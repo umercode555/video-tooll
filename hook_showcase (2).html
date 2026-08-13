@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HOOK & SHOWCASE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#050806;
+    --paper:#f2f0e6;
+    --green:#0e3d24;
+    --green-bright:#1fae66;
+    --line:rgba(242,240,230,0.14);
+    --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+    --disp:'Archivo','Helvetica Neue',Arial,sans-serif;
+    --cap:'League Spartan','Archivo',sans-serif;
+  }
+  @font-face{
+    font-family:'Archivo';
+    src:local('Archivo');
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:var(--mono);
+    min-height:100vh;
+    overflow-x:hidden;
+  }
+  body{
+    display:flex;
+    flex-direction:column;
+  }
+  ::selection{background:var(--green-bright);color:var(--ink);}
+
+  /* ---------- topbar ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:22px clamp(16px,4vw,40px);
+    border-bottom:1px solid var(--line);
+  }
+  .logo{
+    font-family:var(--disp);
+    font-weight:800;
+    font-size:15px;
+    letter-spacing:0.14em;
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+  }
+  .logo .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--green-bright);
+    display:inline-block;
+    box-shadow:0 0 10px var(--green-bright);
+  }
+  .logo .sub{
+    font-size:9px;
+    color:rgba(242,240,230,0.4);
+    letter-spacing:0.2em;
+    font-weight:400;
+  }
+  .specline{
+    font-size:9px;
+    letter-spacing:0.12em;
+    color:rgba(242,240,230,0.4);
+    text-transform:uppercase;
+    text-align:right;
+    line-height:1.6;
+  }
+
+  /* ---------- layout ---------- */
+  .main{
+    flex:1;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 380px;
+    gap:0;
+  }
+  @media (max-width:960px){
+    .main{grid-template-columns:1fr;}
+  }
+  .stage{
+    padding:clamp(20px,4vw,48px);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:22px;
+  }
+  .panel{
+    border-left:1px solid var(--line);
+    padding:clamp(20px,3vw,32px);
+    display:flex;
+    flex-direction:column;
+    gap:28px;
+  }
+
+  /* ---------- template strip ---------- */
+  .tmpl-title{
+    font-family:var(--disp);
+    font-size:11px;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color:rgba(242,240,230,0.5);
+    margin-bottom:10px;
+  }
+  .tmpl-strip{
+    display:flex;
+    width:100%;
+    max-width:520px;
+    height:34px;
+    border-radius:3px;
+    overflow:hidden;
+    border:1px solid var(--line);
+  }
+  .seg{
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:8px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    white-space:nowrap;
+    overflow:hidden;
+    position:relative;
+  }
+  .seg.hook{background:repeating-linear-gradient(90deg,#f2f0e6 0 3px,#0e3d24 3px 6px);flex:0 0 20%;color:transparent;}
+  .seg.card{background:var(--green);flex:0 0 34%;color:var(--green-bright);font-weight:700;}
+  .seg.show{background:#1a1a16;flex:0 0 46%;color:rgba(242,240,230,0.55);}
+  .tmpl-legend{
+    display:flex;
+    gap:18px;
+    flex-wrap:wrap;
+    font-size:9px;
+    color:rgba(242,240,230,0.45);
+    letter-spacing:0.04em;
+  }
+  .tmpl-legend span{display:flex;align-items:center;gap:6px;}
+  .swatch{width:8px;height:8px;border-radius:1px;display:inline-block;}
+  .sw-hook{background:repeating-linear-gradient(90deg,#f2f0e6 0 2px,#0e3d24 2px 4px);}
+  .sw-card{background:var(--green);}
+  .sw-show{background:#1a1a16;border:1px solid var(--line);}
+
+  /* ---------- canvas preview ---------- */
+  .frame{
+    position:relative;
+    width:min(300px,72vw);
+    aspect-ratio:9/16;
+    background:#000;
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+    box-shadow:0 40px 80px -30px rgba(0,0,0,0.8);
+  }
+  .frame canvas{
+    width:100%;
+    height:100%;
+    display:block;
+  }
+  .frame .empty{
+    position:absolute;inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    font-size:10px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:rgba(242,240,230,0.25);
+    padding:20px;
+  }
+  .transport{
+    display:flex;
+    align-items:center;
+    gap:14px;
+  }
+  .playbtn{
+    width:46px;height:46px;
+    border-radius:50%;
+    border:1px solid var(--line);
+    background:transparent;
+    color:var(--paper);
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:background .15s,transform .1s;
+  }
+  .playbtn:hover{background:var(--green);border-color:var(--green-bright);}
+  .playbtn:active{transform:scale(0.94);}
+  .timecode{
+    font-size:11px;
+    letter-spacing:0.06em;
+    color:rgba(242,240,230,0.55);
+    min-width:90px;
+  }
+  .progressline{
+    flex:1;
+    height:24px;
+    position:relative;
+    max-width:220px;
+    cursor:pointer;
+  }
+  .progressline::before{
+    content:'';
+    position:absolute;
+    left:0;right:0;top:50%;
+    height:2px;
+    background:var(--line);
+    transform:translateY(-50%);
+  }
+  .progressline .fill{
+    position:absolute;left:0;top:50%;
+    height:2px;
+    background:var(--green-bright);
+    width:0%;
+    transform:translateY(-50%);
+    pointer-events:none;
+  }
+  .playhead{
+    position:absolute;
+    top:50%;
+    left:0%;
+    width:12px;height:12px;
+    border-radius:50%;
+    background:var(--paper);
+    border:2px solid var(--green-bright);
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+  }
+
+  /* ---------- upload zone ---------- */
+  .drop{
+    border:1px dashed var(--line);
+    border-radius:4px;
+    padding:22px 14px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s,background .15s;
+    position:relative;
+  }
+  .drop:hover,.drop.drag{
+    border-color:var(--green-bright);
+    background:rgba(31,174,102,0.06);
+  }
+  .drop input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+  .drop .dt{
+    font-family:var(--disp);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    margin-bottom:4px;
+  }
+  .drop .ds{
+    font-size:9px;
+    color:rgba(242,240,230,0.4);
+    letter-spacing:0.04em;
+  }
+  .count{
+    font-family:var(--disp);
+    font-size:34px;
+    font-weight:800;
+    line-height:1;
+  }
+  .count span{
+    font-size:14px;
+    font-weight:400;
+    color:rgba(242,240,230,0.4);
+    font-family:var(--mono);
+  }
+  .tray{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:6px;
+  }
+  .thumb{
+    aspect-ratio:1;
+    border-radius:3px;
+    overflow:hidden;
+    position:relative;
+    background:#141410;
+    border:1px solid var(--line);
+    cursor:grab;
+  }
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .thumb .n{
+    position:absolute;top:2px;left:3px;
+    font-size:8px;
+    color:var(--green-bright);
+    text-shadow:0 0 4px #000;
+    font-weight:700;
+  }
+  .thumb .rm{
+    position:absolute;top:1px;right:1px;
+    width:16px;height:16px;
+    background:rgba(5,8,6,0.75);
+    color:var(--paper);
+    border:none;
+    font-size:10px;
+    cursor:pointer;
+    line-height:16px;
+  }
+  .thumb.ghost{opacity:0.3;}
+  .thumb.empty-slot{
+    display:flex;align-items:center;justify-content:center;
+    color:rgba(242,240,230,0.2);
+    font-size:9px;
+    border-style:dashed;
+  }
+
+  /* ---------- caption field ---------- */
+  .field label{
+    display:block;
+    font-size:9px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:rgba(242,240,230,0.5);
+    margin-bottom:8px;
+  }
+  .field textarea, .field input[type=text]{
+    width:100%;
+    background:#0d0f0c;
+    border:1px solid var(--line);
+    border-radius:3px;
+    color:var(--paper);
+    font-family:var(--mono);
+    font-size:12px;
+    padding:10px;
+    resize:vertical;
+    min-height:38px;
+  }
+  .field textarea:focus, .field input:focus{
+    outline:none;
+    border-color:var(--green-bright);
+  }
+  .cap-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:10px;
+  }
+  .cap-row .idx{
+    width:18px;
+    color:var(--green-bright);
+    font-weight:700;
+  }
+
+  /* ---------- action ---------- */
+  .generate{
+    width:100%;
+    padding:16px;
+    background:var(--green-bright);
+    color:var(--ink);
+    border:none;
+    border-radius:3px;
+    font-family:var(--disp);
+    font-weight:800;
+    font-size:12px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    cursor:pointer;
+    transition:filter .15s, transform .1s;
+  }
+  .generate:hover{filter:brightness(1.1);}
+  .generate:active{transform:scale(0.98);}
+  .generate:disabled{
+    background:#2a2c26;
+    color:rgba(242,240,230,0.3);
+    cursor:not-allowed;
+  }
+  .status{
+    font-size:10px;
+    letter-spacing:0.05em;
+    color:rgba(242,240,230,0.5);
+    display:flex;
+    justify-content:space-between;
+  }
+  .genbar{
+    width:100%;height:3px;
+    background:var(--line);
+    border-radius:2px;
+    overflow:hidden;
+    display:none;
+  }
+  .genbar.on{display:block;}
+  .genbar .f{
+    height:100%;width:0%;
+    background:var(--green-bright);
+    transition:width .1s linear;
+  }
+  .dl{
+    display:none;
+    text-align:center;
+    padding:14px;
+    border:1px solid var(--green-bright);
+    border-radius:3px;
+    color:var(--green-bright);
+    text-decoration:none;
+    font-size:11px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    font-weight:700;
+  }
+  .dl.on{display:block;}
+  .footnote{
+    font-size:8.5px;
+    color:rgba(242,240,230,0.3);
+    letter-spacing:0.03em;
+    line-height:1.6;
+  }
+
+  /* ---------- timing controls ---------- */
+  .timing-row{
+    display:grid;
+    grid-template-columns:1fr 3fr 46px;
+    align-items:center;
+    gap:10px;
+    margin-bottom:12px;
+    font-size:9.5px;
+    letter-spacing:0.03em;
+    color:rgba(242,240,230,0.6);
+    text-transform:uppercase;
+  }
+  .timing-row:last-child{margin-bottom:0;}
+  .timing-row input[type=range]{
+    -webkit-appearance:none;
+    width:100%;
+    height:2px;
+    background:var(--line);
+    border-radius:2px;
+    outline:none;
+  }
+  .timing-row input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:13px;height:13px;
+    border-radius:50%;
+    background:var(--green-bright);
+    cursor:pointer;
+    box-shadow:0 0 0 3px rgba(31,174,102,0.2);
+  }
+  .timing-row input[type=range]::-moz-range-thumb{
+    width:13px;height:13px;border:none;border-radius:50%;
+    background:var(--green-bright);cursor:pointer;
+  }
+  .timing-row .val{
+    font-family:var(--mono);
+    color:var(--green-bright);
+    text-align:right;
+    font-size:10px;
+  }
+  .timing-row select{
+    grid-column:2/4;
+    background:#0d0f0c;
+    border:1px solid var(--line);
+    color:var(--paper);
+    font-family:var(--mono);
+    font-size:10.5px;
+    padding:7px 8px;
+    border-radius:3px;
+  }
+
+  /* ---------- caption alignment ---------- */
+  .align-row{
+    display:flex;
+    gap:6px;
+    margin-top:10px;
+  }
+  .align-btn{
+    flex:1;
+    padding:8px 4px;
+    background:#0d0f0c;
+    border:1px solid var(--line);
+    color:rgba(242,240,230,0.6);
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    cursor:pointer;
+    border-radius:3px;
+    transition:all .12s;
+  }
+  .align-btn:hover{border-color:var(--green-bright);color:var(--paper);}
+  .align-btn.active{background:var(--green-bright);color:var(--ink);border-color:var(--green-bright);font-weight:700;}
+  .hint{
+    font-size:8.5px;
+    color:rgba(242,240,230,0.35);
+    margin-top:8px;
+    letter-spacing:0.02em;
+  }
+
+  /* ---------- caption drag handle on preview ---------- */
+  .cap-handle{
+    position:absolute;
+    width:22px;height:22px;
+    border-radius:50%;
+    border:2px solid var(--green-bright);
+    background:rgba(31,174,102,0.25);
+    transform:translate(-50%,-50%);
+    cursor:grab;
+    touch-action:none;
+    box-shadow:0 0 0 4px rgba(5,8,6,0.5);
+  }
+  .cap-handle::after{
+    content:'';
+    position:absolute;
+    inset:6px;
+    border-radius:50%;
+    background:var(--green-bright);
+  }
+  .cap-handle.dragging{cursor:grabbing;background:rgba(31,174,102,0.5);}
+
+  /* ---------- per-row duration input ---------- */
+  .cap-row{align-items:center;}
+  .capDur{
+    width:52px;
+    flex:0 0 52px;
+    background:#0d0f0c;
+    border:1px solid var(--line);
+    border-radius:3px;
+    color:var(--green-bright);
+    font-family:var(--mono);
+    font-size:10px;
+    padding:7px 6px;
+    text-align:center;
+  }
+  .capDur:focus{outline:none;border-color:var(--green-bright);}
+
+  /* ---------- toggle checkbox ---------- */
+  .toggle-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:10px;
+    letter-spacing:0.04em;
+    color:rgba(242,240,230,0.6);
+    text-transform:uppercase;
+    cursor:pointer;
+    user-select:none;
+  }
+  .toggle-row input[type=checkbox]{
+    width:14px;height:14px;
+    accent-color:var(--green-bright);
+    cursor:pointer;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo"><span class="dot"></span>HOOK <span style="color:var(--green-bright)">&</span> SHOWCASE<span class="sub">V1 / TEMPLATE-LOCKED</span></div>
+  <div class="specline">1080 × 1920 · 9:16<br>REEL / STORY / SHORT</div>
+</div>
+
+<div class="main">
+
+  <div class="stage">
+    <div style="width:100%;max-width:520px;">
+      <div class="tmpl-title">Three acts — timing and card position are yours</div>
+      <div class="tmpl-strip" id="tmplStrip"></div>
+      <div class="tmpl-legend" style="margin-top:10px;" id="tmplLegend">
+        <span><i class="swatch sw-hook"></i>hook flash</span>
+        <span><i class="swatch sw-card"></i>card</span>
+        <span><i class="swatch sw-show"></i>showcase</span>
+      </div>
+    </div>
+
+    <div class="frame" id="frame">
+      <canvas id="cv" width="1080" height="1920"></canvas>
+      <div class="empty" id="emptyState">Load 10 images<br>to preview the cut</div>
+      <div class="cap-handle" id="capHandle" title="Drag to position caption"></div>
+    </div>
+
+    <div class="transport">
+      <button class="playbtn" id="playBtn" title="Preview">
+        <svg id="playIcon" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2.5V13.5L13 8L4 2.5Z" fill="currentColor"/></svg>
+      </button>
+      <div class="timecode" id="timecode">00.0 / 00.0s</div>
+      <div class="progressline" id="progressLine"><div class="fill" id="progFill"></div><div class="playhead" id="playhead"></div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+
+    <div>
+      <label for="fileInput" class="drop" id="dropZone">
+        <input type="file" id="fileInput" accept="image/*" multiple>
+        <div class="dt">Drop or select images</div>
+        <div class="ds">exactly 10 · jpg / png / webp</div>
+      </label>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-top:14px;">
+        <div class="count" id="countNum">0<span>/10</span></div>
+      </div>
+      <div class="tray" id="tray" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="field">
+      <label>Structure &amp; timing</label>
+      <div class="timing-row">
+        <span>Hook flash</span>
+        <input type="range" id="hookDurRange" min="0.1" max="1" step="0.05" value="0.2">
+        <span class="val" id="hookDurVal">0.20s</span>
+      </div>
+      <div class="timing-row">
+        <span>Card length</span>
+        <input type="range" id="cardDurRange" min="1" max="10" step="0.5" value="3">
+        <span class="val" id="cardDurVal">3.0s</span>
+      </div>
+      <div class="timing-row">
+        <span>Card position</span>
+        <select id="cardPosSelect"></select>
+      </div>
+      <div class="timing-row">
+        <span>Image length</span>
+        <input type="range" id="showDurRange" min="0.2" max="5" step="0.1" value="1">
+        <span class="val" id="showDurVal">1.0s</span>
+      </div>
+      <div class="timing-row">
+        <span>Card word size</span>
+        <input type="range" id="cardSizeRange" min="40" max="200" step="2" value="130">
+        <span class="val" id="cardSizeVal">130px</span>
+      </div>
+      <div class="timing-row">
+        <span>Caption size</span>
+        <input type="range" id="capSizeRange" min="24" max="100" step="1" value="56">
+        <span class="val" id="capSizeVal">56px</span>
+      </div>
+      <div class="hint">"Image length" sets all showcase images at once — fine-tune any single image with the number field next to its caption below. Type captions exactly how you want them shown — nothing is auto-capitalized.</div>
+    </div>
+
+    <div class="field">
+      <label>Hook flash captions (act 1, optional, one per image)</label>
+      <label class="toggle-row"><input type="checkbox" id="hookWordToggle"><span>Reveal one word at a time</span></label>
+      <div id="hookCapList" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+    </div>
+
+    <div class="field">
+      <label>Showcase captions (act 3, text + seconds per image)</label>
+      <label class="toggle-row"><input type="checkbox" id="showWordToggle"><span>Reveal one word at a time</span></label>
+      <div id="capList" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+      <div style="margin-top:14px;">
+        <label style="margin-bottom:6px;">Caption position</label>
+        <div class="align-row" id="alignRow">
+          <button class="align-btn" data-a="top">Top</button>
+          <button class="align-btn" data-a="center">Center</button>
+          <button class="align-btn active" data-a="bottom">Bottom</button>
+          <button class="align-btn active" data-a="left">Left</button>
+          <button class="align-btn" data-a="right">Right</button>
+        </div>
+        <div class="hint">League Spartan, bold, white, your exact capitalization. Drag the green dot on the preview to fine-tune exact position.</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Card text (act 2, reveals one word at a time across the card's length)</label>
+      <input type="text" id="cardText" value="Watch this. Comment vintage. To get my free guide." maxlength="140">
+    </div>
+
+    <div class="field">
+      <label>Audio track (optional)</label>
+      <label for="audioInput" class="drop" id="audioDrop" style="padding:16px;">
+        <input type="file" id="audioInput" accept="audio/mp3,audio/mpeg,audio/*">
+        <div class="dt" id="audioDT">Add MP3</div>
+        <div class="ds" id="audioDS">plays under the full video, muted after export finishes</div>
+      </label>
+      <button class="align-btn" id="audioRemove" style="display:none;margin-top:8px;width:100%;">Remove audio</button>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="generate" id="genBtn" disabled>Load 10 images first</button>
+      <div class="genbar" id="genBar"><div class="f" id="genFill"></div></div>
+      <div class="status" id="genStatus" style="display:none;">
+        <span id="genLabel">Rendering…</span><span id="genPct">0%</span>
+      </div>
+      <a href="#" class="dl" id="dlLink" download="hook-showcase.mp4">Download video</a>
+    </div>
+
+    <div class="footnote">
+      Renders entirely in-browser via Canvas + MediaRecorder. No upload, no server. Exports as MP4 where your browser supports it directly (Safari); elsewhere it's captured then converted to MP4 in-browser before download, so it opens correctly on WhatsApp and Instagram.
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const W = 1080, H = 1920;
+  const N = 10;
+
+  // ---------- mutable timeline state ----------
+  let hookDur = 0.2;                       // seconds per hook flash image
+  let cardDur = 3.0;                       // seconds, card segment
+  let cardPos = 0;                         // 0..N — card sits after this many showcase images
+  let showDur = new Array(N).fill(1.0);    // seconds per showcase image
+  let captionPos = { xNorm:0.06, yNorm:0.895, align:'left' }; // anchor for showcase captions
+  let previewT = 0;                        // last rendered preview time, for live-redraw on control change
+  let cardFontSize = 130;
+  let capFontSize = 56;
+  let hookWordByWord = false;
+  let showWordByWord = false;
+  let audioFile = null;
+
+  let images = new Array(N).fill(null); // {file, url, img}
+  let captions = new Array(N).fill('');
+  let hookCaptions = new Array(N).fill('');
+  let dragSrc = null;
+
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const tray = document.getElementById('tray');
+  const countNum = document.getElementById('countNum');
+  const capList = document.getElementById('capList');
+  const cardTextInput = document.getElementById('cardText');
+  const genBtn = document.getElementById('genBtn');
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const emptyState = document.getElementById('emptyState');
+  const playBtn = document.getElementById('playBtn');
+  const playIcon = document.getElementById('playIcon');
+  const timecode = document.getElementById('timecode');
+  const progFill = document.getElementById('progFill');
+  const genBar = document.getElementById('genBar');
+  const genFill = document.getElementById('genFill');
+  const genStatus = document.getElementById('genStatus');
+  const genLabel = document.getElementById('genLabel');
+  const genPct = document.getElementById('genPct');
+  const dlLink = document.getElementById('dlLink');
+  const tmplStrip = document.getElementById('tmplStrip');
+  const hookDurRange = document.getElementById('hookDurRange');
+  const hookDurVal = document.getElementById('hookDurVal');
+  const cardDurRange = document.getElementById('cardDurRange');
+  const cardDurVal = document.getElementById('cardDurVal');
+  const cardPosSelect = document.getElementById('cardPosSelect');
+  const showDurRange = document.getElementById('showDurRange');
+  const showDurVal = document.getElementById('showDurVal');
+  const alignRow = document.getElementById('alignRow');
+  const capHandle = document.getElementById('capHandle');
+  const frameEl = document.getElementById('frame');
+  const cardSizeRange = document.getElementById('cardSizeRange');
+  const cardSizeVal = document.getElementById('cardSizeVal');
+  const capSizeRange = document.getElementById('capSizeRange');
+  const capSizeVal = document.getElementById('capSizeVal');
+  const hookWordToggle = document.getElementById('hookWordToggle');
+  const showWordToggle = document.getElementById('showWordToggle');
+  const hookCapList = document.getElementById('hookCapList');
+  const audioInput = document.getElementById('audioInput');
+  const audioDT = document.getElementById('audioDT');
+  const audioDS = document.getElementById('audioDS');
+  const audioRemove = document.getElementById('audioRemove');
+  const progressLine = document.getElementById('progressLine');
+  const playhead = document.getElementById('playhead');
+
+  // ---------- timeline construction ----------
+  function getSegments(){
+    const hookSegs = [];
+    for(let i=0;i<N;i++) hookSegs.push({type:'hook', idx:i, dur:hookDur});
+    const showSegs = [];
+    for(let i=0;i<N;i++) showSegs.push({type:'show', idx:i, dur:showDur[i]});
+    const pos = Math.max(0, Math.min(N, cardPos));
+    const cardSeg = {type:'card', dur:cardDur};
+    const showWithCard = showSegs.slice(0,pos).concat([cardSeg], showSegs.slice(pos));
+    return hookSegs.concat(showWithCard);
+  }
+
+  function totalDuration(){
+    return getSegments().reduce((a,s)=>a+s.dur,0);
+  }
+
+  function loadedCount(){
+    return images.filter(Boolean).length;
+  }
+
+  // ---------- control wiring ----------
+  function buildCardPosOptions(){
+    cardPosSelect.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = 0; opt0.textContent = 'Right after hook (before image 1)';
+    cardPosSelect.appendChild(opt0);
+    for(let i=1;i<=N;i++){
+      const o = document.createElement('option');
+      o.value = i;
+      o.textContent = i===N ? `After image ${i} (at the end)` : `Between image ${i} and ${i+1}`;
+      cardPosSelect.appendChild(o);
+    }
+    cardPosSelect.value = cardPos;
+  }
+  buildCardPosOptions();
+
+  hookDurRange.addEventListener('input', ()=>{
+    hookDur = +hookDurRange.value;
+    hookDurVal.textContent = hookDur.toFixed(2)+'s';
+    refreshAll();
+  });
+  cardDurRange.addEventListener('input', ()=>{
+    cardDur = +cardDurRange.value;
+    cardDurVal.textContent = cardDur.toFixed(1)+'s';
+    refreshAll();
+  });
+  cardPosSelect.addEventListener('change', ()=>{
+    cardPos = +cardPosSelect.value;
+    refreshAll();
+  });
+  showDurRange.addEventListener('input', ()=>{
+    const v = +showDurRange.value;
+    showDurVal.textContent = v.toFixed(1)+'s';
+    showDur = new Array(N).fill(v);
+    renderCaptions();
+    refreshAll();
+  });
+
+  cardSizeRange.addEventListener('input', ()=>{
+    cardFontSize = +cardSizeRange.value;
+    cardSizeVal.textContent = cardFontSize+'px';
+    drawPreviewFrame(previewT);
+  });
+  capSizeRange.addEventListener('input', ()=>{
+    capFontSize = +capSizeRange.value;
+    capSizeVal.textContent = capFontSize+'px';
+    drawPreviewFrame(previewT);
+  });
+  hookWordToggle.addEventListener('change', ()=>{
+    hookWordByWord = hookWordToggle.checked;
+    drawPreviewFrame(previewT);
+  });
+  showWordToggle.addEventListener('change', ()=>{
+    showWordByWord = showWordToggle.checked;
+    drawPreviewFrame(previewT);
+  });
+
+  audioInput.addEventListener('change', e=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    audioFile = f;
+    audioDT.textContent = f.name;
+    audioDS.textContent = 'Ready — mixed into the exported video';
+    audioRemove.style.display = 'block';
+  });
+  audioRemove.addEventListener('click', e=>{
+    e.preventDefault();
+    audioFile = null;
+    audioInput.value = '';
+    audioDT.textContent = 'Add MP3';
+    audioDS.textContent = 'plays under the full video, muted after export finishes';
+    audioRemove.style.display = 'none';
+  });
+
+  alignRow.querySelectorAll('.align-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = btn.dataset.a;
+      if(a==='top') captionPos.yNorm = 0.14;
+      else if(a==='center') captionPos.yNorm = 0.5;
+      else if(a==='bottom') captionPos.yNorm = 0.895;
+      else if(a==='left'){ captionPos.align='left'; captionPos.xNorm = 0.06; }
+      else if(a==='right'){ captionPos.align='right'; captionPos.xNorm = 0.94; }
+      if(a==='top'||a==='center'||a==='bottom'){
+        alignRow.querySelectorAll('.align-btn').forEach(b=>{ if(['top','center','bottom'].includes(b.dataset.a)) b.classList.remove('active'); });
+        btn.classList.add('active');
+      } else {
+        alignRow.querySelectorAll('.align-btn').forEach(b=>{ if(['left','right'].includes(b.dataset.a)) b.classList.remove('active'); });
+        btn.classList.add('active');
+        if(a==='left' || a==='right'){
+          // center wasn't explicitly toggled off if user only picks left/right; also un-set center-h implied
+        }
+      }
+      updateCapHandle();
+      drawPreviewFrame(previewT);
+    });
+  });
+
+  function updateCapHandle(){
+    capHandle.style.left = (captionPos.xNorm*100)+'%';
+    capHandle.style.top = (captionPos.yNorm*100)+'%';
+  }
+  updateCapHandle();
+
+  // drag the caption handle directly on the preview
+  (function(){
+    let dragging = false;
+    function setFromEvent(clientX, clientY){
+      const r = frameEl.getBoundingClientRect();
+      let x = (clientX - r.left)/r.width;
+      let y = (clientY - r.top)/r.height;
+      x = Math.max(0.02, Math.min(0.98, x));
+      y = Math.max(0.05, Math.min(0.97, y));
+      captionPos.xNorm = x; captionPos.yNorm = y;
+      updateCapHandle();
+      drawPreviewFrame(previewT);
+    }
+    capHandle.addEventListener('mousedown', e=>{ dragging=true; capHandle.classList.add('dragging'); e.preventDefault(); });
+    window.addEventListener('mousemove', e=>{ if(dragging) setFromEvent(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', ()=>{ dragging=false; capHandle.classList.remove('dragging'); });
+    capHandle.addEventListener('touchstart', e=>{ dragging=true; capHandle.classList.add('dragging'); }, {passive:true});
+    window.addEventListener('touchmove', e=>{ if(dragging && e.touches[0]) setFromEvent(e.touches[0].clientX, e.touches[0].clientY); }, {passive:true});
+    window.addEventListener('touchend', ()=>{ dragging=false; capHandle.classList.remove('dragging'); });
+  })();
+
+  cardTextInput.addEventListener('input', ()=> drawPreviewFrame(previewT));
+
+  function refreshAll(){
+    updateStripVisual();
+    drawPreviewFrame(previewT);
+    timecode.textContent = `${previewT.toFixed(1)} / ${totalDuration().toFixed(1)}s`;
+  }
+
+  function updateStripVisual(){
+    const segs = getSegments();
+    const total = segs.reduce((a,s)=>a+s.dur,0) || 1;
+    tmplStrip.innerHTML = '';
+    segs.forEach(s=>{
+      const d = document.createElement('div');
+      d.className = 'seg';
+      d.style.flex = `0 0 ${(s.dur/total*100)}%`;
+      if(s.type==='hook'){ d.style.background = 'repeating-linear-gradient(90deg,#f2f0e6 0 3px,#0e3d24 3px 6px)'; }
+      else if(s.type==='card'){ d.style.background = 'var(--green)'; }
+      else { d.style.background = (s.idx%2===0) ? '#1a1a16' : '#242420'; }
+      tmplStrip.appendChild(d);
+    });
+  }
+
+  function handleFiles(fileList){
+    const files = Array.from(fileList).filter(f=>f.type.startsWith('image/'));
+    let slot = images.findIndex(x=>!x);
+    for(const f of files){
+      if(slot === -1 || slot >= N) break;
+      const url = URL.createObjectURL(f);
+      const img = new Image();
+      const s = slot;
+      img.onload = ()=>{ images[s] = {file:f, url, img}; renderTray(); updateGenState(); };
+      img.src = url;
+      slot++;
+      while(slot < N && images[slot]) slot++;
+    }
+  }
+
+  fileInput.addEventListener('change', e=>{ handleFiles(e.target.files); fileInput.value=''; });
+  ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
+  dropZone.addEventListener('drop', e=>{ if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+
+  function renderTray(){
+    tray.innerHTML = '';
+    for(let i=0;i<N;i++){
+      const slot = images[i];
+      const div = document.createElement('div');
+      div.className = 'thumb' + (slot?'':' empty-slot');
+      div.draggable = !!slot;
+      div.dataset.idx = i;
+      if(slot){
+        div.innerHTML = `<img src="${slot.url}"><span class="n">${i+1}</span><button class="rm" data-i="${i}">×</button>`;
+      } else {
+        div.textContent = (i+1);
+      }
+      tray.appendChild(div);
+    }
+    countNum.innerHTML = loadedCount() + '<span>/10</span>';
+
+    tray.querySelectorAll('.rm').forEach(btn=>{
+      btn.addEventListener('click', e=>{
+        e.preventDefault();
+        const i = +btn.dataset.i;
+        images[i] = null;
+        renderTray(); renderCaptions(); renderHookCaptions(); updateGenState(); refreshAll();
+      });
+    });
+    tray.querySelectorAll('.thumb[draggable=true]').forEach(el=>{
+      el.addEventListener('dragstart', e=>{ dragSrc = +el.dataset.idx; el.classList.add('ghost'); });
+      el.addEventListener('dragend', e=>{ el.classList.remove('ghost'); });
+    });
+    tray.querySelectorAll('.thumb').forEach(el=>{
+      el.addEventListener('dragover', e=>e.preventDefault());
+      el.addEventListener('drop', e=>{
+        e.preventDefault();
+        const dst = +el.dataset.idx;
+        if(dragSrc===null || dragSrc===dst) return;
+        const tmp = images[dst]; images[dst] = images[dragSrc]; images[dragSrc] = tmp;
+        const tmpc = captions[dst]; captions[dst] = captions[dragSrc]; captions[dragSrc] = tmpc;
+        const tmpd = showDur[dst]; showDur[dst] = showDur[dragSrc]; showDur[dragSrc] = tmpd;
+        const tmph = hookCaptions[dst]; hookCaptions[dst] = hookCaptions[dragSrc]; hookCaptions[dragSrc] = tmph;
+        dragSrc = null;
+        renderTray(); renderCaptions(); renderHookCaptions(); refreshAll();
+      });
+    });
+    renderCaptions();
+    renderHookCaptions();
+  }
+
+  function renderCaptions(){
+    capList.innerHTML = '';
+    for(let i=0;i<N;i++){
+      const row = document.createElement('div');
+      row.className = 'cap-row';
+      row.innerHTML = `<span class="idx">${i+1}</span><input type="text" class="capText" data-i="${i}" placeholder="${images[i] ? 'caption '+(i+1) : '— empty slot —'}" value="${captions[i]||''}" maxlength="60" style="flex:1;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;"><input type="number" class="capDur" data-i="${i}" min="0.2" max="5" step="0.1" value="${showDur[i].toFixed(1)}" title="seconds for this image">`;
+      capList.appendChild(row);
+    }
+    capList.querySelectorAll('.capText').forEach(inp=>{
+      inp.addEventListener('input', e=>{ captions[+inp.dataset.i] = inp.value; drawPreviewFrame(previewT); });
+    });
+    capList.querySelectorAll('.capDur').forEach(inp=>{
+      inp.addEventListener('input', e=>{
+        let v = parseFloat(inp.value);
+        if(isNaN(v)) return;
+        v = Math.max(0.2, Math.min(5, v));
+        showDur[+inp.dataset.i] = v;
+        refreshAll();
+      });
+    });
+  }
+
+  function renderHookCaptions(){
+    hookCapList.innerHTML = '';
+    for(let i=0;i<N;i++){
+      const row = document.createElement('div');
+      row.className = 'cap-row';
+      row.innerHTML = `<span class="idx">${i+1}</span><input type="text" class="hookCapText" data-i="${i}" placeholder="${images[i] ? 'flash caption '+(i+1)+' (optional)' : '— empty slot —'}" value="${hookCaptions[i]||''}" maxlength="60" style="flex:1;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;">`;
+      hookCapList.appendChild(row);
+    }
+    hookCapList.querySelectorAll('.hookCapText').forEach(inp=>{
+      inp.addEventListener('input', e=>{ hookCaptions[+inp.dataset.i] = inp.value; drawPreviewFrame(previewT); });
+    });
+  }
+
+  function updateGenState(){
+    const n = loadedCount();
+    if(n === N){
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate video';
+      emptyState.style.display = 'none';
+      refreshAll();
+    } else {
+      genBtn.disabled = true;
+      genBtn.textContent = `Load 10 images first (${n}/10)`;
+      if(n===0){ emptyState.style.display='flex'; }
+    }
+  }
+
+  renderTray();
+  updateStripVisual();
+
+  // ---------- drawing ----------
+  function coverDraw(img, x, y, w, h){
+    const ir = img.width/img.height, r = w/h;
+    let sx,sy,sw,sh;
+    if(ir > r){ sh = img.height; sw = sh*r; sx = (img.width-sw)/2; sy=0; }
+    else { sw = img.width; sh = sw/r; sx=0; sy=(img.height-sh)/2; }
+    ctx.drawImage(img, sx,sy,sw,sh, x,y,w,h);
+  }
+
+  // ---------- generic word-by-word text ----------
+  function drawWordByWord(text, localT, dur, fontSize, x, y, align){
+    const words = (text||'').trim().split(/\s+/).filter(Boolean);
+    if(words.length === 0) return;
+    const per = dur / words.length;
+    const wIdx = Math.max(0, Math.min(words.length-1, Math.floor(localT/per)));
+    const word = words[wIdx];
+
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    let fs = fontSize;
+    ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
+    while(ctx.measureText(word).width > W*0.86 && fs > 24){
+      fs -= 4;
+      ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
+    }
+    ctx.fillStyle = '#ffffff';
+    let xx = x;
+    if(align==='left') xx = Math.max(48, x);
+    if(align==='right') xx = Math.min(W-48, x);
+    ctx.fillText(word, xx, y);
+    return { words, wIdx, fontSizeUsed: fs };
+  }
+
+  function drawCard(text, localT, dur){
+    ctx.fillStyle = '#0e3d24';
+    ctx.fillRect(0,0,W,H);
+    // faint texture lines
+    ctx.strokeStyle = 'rgba(31,174,102,0.12)';
+    ctx.lineWidth = 2;
+    for(let i=0;i<10;i++){
+      ctx.beginPath();
+      ctx.moveTo(0, i*H/10 + 40);
+      ctx.lineTo(W, i*H/10 + 40);
+      ctx.stroke();
+    }
+
+    const res = drawWordByWord(text, localT, dur, cardFontSize, W/2, H/2, 'center');
+    if(!res) return;
+    const { words, wIdx, fontSizeUsed } = res;
+
+    // word progress dots
+    const dotGap = 18, dotR = 5;
+    const totalW = (words.length-1)*dotGap;
+    const startX = W/2 - totalW/2;
+    for(let i=0;i<words.length;i++){
+      ctx.beginPath();
+      ctx.fillStyle = i===wIdx ? '#1fae66' : 'rgba(242,240,230,0.25)';
+      ctx.arc(startX + i*dotGap, H/2 + fontSizeUsed*0.62, i===wIdx?6:dotR, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawShowcase(img, caption, idx, dur, localT){
+    ctx.fillStyle = '#050806';
+    ctx.fillRect(0,0,W,H);
+    coverDraw(img, 0, 0, W, H);
+
+    // index tag, top-left, out of the way of a movable caption
+    ctx.font = '600 26px "SF Mono", monospace';
+    ctx.fillStyle = '#1fae66';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 10;
+    ctx.fillText(String(idx+1).padStart(2,'0') + ' / ' + String(N).padStart(2,'0'), 48, 82);
+    ctx.shadowBlur = 0;
+
+    if(caption){
+      const x = captionPos.xNorm * W;
+      const y = captionPos.yNorm * H;
+      const align = captionPos.align;
+
+      // legibility band behind the caption
+      const bandH = 380;
+      const grad = ctx.createLinearGradient(0, y-bandH, 0, y+bandH);
+      grad.addColorStop(0, 'rgba(5,8,6,0)');
+      grad.addColorStop(0.5, 'rgba(5,8,6,0.78)');
+      grad.addColorStop(1, 'rgba(5,8,6,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, Math.max(0,y-bandH), W, bandH*2);
+
+      if(showWordByWord){
+        drawWordByWord(caption, localT||0, dur, capFontSize, x, y, align);
+      } else {
+        ctx.font = `800 ${capFontSize}px 'League Spartan', Archivo, Arial, sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = align;
+        ctx.textBaseline = 'middle';
+        let xClamped = x;
+        if(align==='left') xClamped = Math.max(48, x);
+        if(align==='right') xClamped = Math.min(W-48, x);
+        wrapTextAligned(caption, xClamped, y, W*0.86, capFontSize*1.1, 3, align);
+      }
+    }
+  }
+
+  function wrapTextAligned(text, x, y, maxWidth, lineHeight, maxLines, align){
+    const words = text.split(' ');
+    let line = '', lines = [];
+    for(const w of words){
+      const test = line ? line+' '+w : w;
+      if(ctx.measureText(test).width > maxWidth && line){ lines.push(line); line = w; }
+      else line = test;
+    }
+    if(line) lines.push(line);
+    lines = lines.slice(0,maxLines);
+    const startY = y - (lines.length-1)*lineHeight/2;
+    lines.forEach((ln,i)=> ctx.fillText(ln, x, startY + i*lineHeight));
+  }
+
+  function drawHookFlash(img, caption, localT, dur){
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,W,H);
+    coverDraw(img, 0, 0, W, H);
+    // hard vignette flash edge for kinetic feel
+    ctx.strokeStyle = 'rgba(242,240,230,0.8)';
+    ctx.lineWidth = 14;
+    ctx.strokeRect(7,7,W-14,H-14);
+
+    if(caption){
+      const x = W/2, y = H*0.88;
+      const bandH = 220;
+      const grad = ctx.createLinearGradient(0, y-bandH, 0, y+bandH);
+      grad.addColorStop(0, 'rgba(5,8,6,0)');
+      grad.addColorStop(0.5, 'rgba(5,8,6,0.7)');
+      grad.addColorStop(1, 'rgba(5,8,6,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, Math.max(0,y-bandH), W, bandH*2);
+
+      if(hookWordByWord){
+        drawWordByWord(caption, localT||0, dur, Math.min(capFontSize, 64), x, y, 'center');
+      } else {
+        ctx.font = `800 ${Math.min(capFontSize,48)}px 'League Spartan', Archivo, Arial, sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        wrapTextAligned(caption, x, y, W*0.86, Math.min(capFontSize,48)*1.1, 2, 'center');
+      }
+    }
+  }
+
+  // timeline: returns what to draw at time t (seconds)
+  function renderAt(t){
+    const segs = getSegments();
+    let acc = 0;
+    for(const s of segs){
+      if(t < acc + s.dur || s === segs[segs.length-1]){
+        const local = t - acc;
+        if(s.type === 'hook'){ if(images[s.idx]) drawHookFlash(images[s.idx].img, hookCaptions[s.idx], Math.max(0,local), s.dur); }
+        else if(s.type === 'card'){ drawCard(cardTextInput.value, Math.max(0,local), s.dur); }
+        else { if(images[s.idx]) drawShowcase(images[s.idx].img, captions[s.idx], s.idx, s.dur, Math.max(0,local)); }
+        return;
+      }
+      acc += s.dur;
+    }
+  }
+
+  function drawPreviewFrame(t){
+    if(loadedCount()<N) return;
+    previewT = t;
+    renderAt(t);
+  }
+
+  // ---------- preview playback ----------
+  let playing = false, rafId = null, startTs = 0, playFrom = 0;
+
+  function setProgress(ratio){
+    ratio = Math.max(0, Math.min(1, ratio));
+    progFill.style.width = (ratio*100)+'%';
+    playhead.style.left = (ratio*100)+'%';
+  }
+
+  playBtn.addEventListener('click', ()=>{
+    if(loadedCount()<N) return;
+    if(playing){ stopPreview(); return; }
+    playing = true;
+    playIcon.innerHTML = '<rect x="3" y="2.5" width="4" height="11" fill="currentColor"/><rect x="9" y="2.5" width="4" height="11" fill="currentColor"/>';
+    playFrom = previewT >= totalDuration()-0.05 ? 0 : previewT;
+    startTs = performance.now();
+    tick();
+  });
+  function stopPreview(){
+    playing = false;
+    playIcon.innerHTML = '<path d="M4 2.5V13.5L13 8L4 2.5Z" fill="currentColor"/>';
+    if(rafId) cancelAnimationFrame(rafId);
+  }
+  function tick(){
+    const dur = totalDuration();
+    const t = playFrom + (performance.now() - startTs)/1000;
+    if(t >= dur){ stopPreview(); drawPreviewFrame(0); timecode.textContent = `00.0 / ${dur.toFixed(1)}s`; setProgress(0); return; }
+    drawPreviewFrame(t);
+    timecode.textContent = `${t.toFixed(1)} / ${dur.toFixed(1)}s`;
+    setProgress(t/dur);
+    rafId = requestAnimationFrame(tick);
+  }
+  window.addEventListener('resize', updateCapHandle);
+
+  // ---------- scrub the timeline like Canva: click or drag anywhere on the bar ----------
+  (function(){
+    let scrubbing = false;
+    function seek(clientX){
+      if(loadedCount()<N) return;
+      const r = progressLine.getBoundingClientRect();
+      let ratio = (clientX - r.left) / r.width;
+      ratio = Math.max(0, Math.min(1, ratio));
+      const dur = totalDuration();
+      const t = ratio*dur;
+      drawPreviewFrame(t);
+      timecode.textContent = `${t.toFixed(1)} / ${dur.toFixed(1)}s`;
+      setProgress(ratio);
+    }
+    progressLine.addEventListener('mousedown', e=>{ if(playing) stopPreview(); scrubbing=true; seek(e.clientX); });
+    window.addEventListener('mousemove', e=>{ if(scrubbing) seek(e.clientX); });
+    window.addEventListener('mouseup', ()=>{ scrubbing=false; });
+    progressLine.addEventListener('touchstart', e=>{ if(playing) stopPreview(); scrubbing=true; if(e.touches[0]) seek(e.touches[0].clientX); }, {passive:true});
+    window.addEventListener('touchmove', e=>{ if(scrubbing && e.touches[0]) seek(e.touches[0].clientX); }, {passive:true});
+    window.addEventListener('touchend', ()=>{ scrubbing=false; });
+  })();
+
+  // ---------- MP4 conversion helper (ffmpeg.wasm, loaded on demand) ----------
+  function loadScriptOnce(src){
+    return new Promise((resolve,reject)=>{
+      if(document.querySelector(`script[data-src="${src}"]`)){ resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src; s.dataset.src = src;
+      s.onload = ()=>resolve();
+      s.onerror = ()=>reject(new Error('failed to load '+src));
+      document.head.appendChild(s);
+    });
+  }
+  async function webmToMp4(webmBlob, onProgress){
+    await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
+    const { createFFmpeg, fetchFile } = window.FFmpeg;
+    const ffmpeg = createFFmpeg({ log:false });
+    ffmpeg.setProgress(({ ratio })=>{ if(ratio>=0) onProgress(Math.round(ratio*100)); });
+    if(!ffmpeg.isLoaded()) await ffmpeg.load();
+    ffmpeg.FS('writeFile', 'in.webm', await fetchFile(webmBlob));
+    await ffmpeg.run('-i','in.webm','-c:v','libx264','-pix_fmt','yuv420p','-preset','veryfast','-crf','23','-c:a','aac','-b:a','160k','-movflags','+faststart','out.mp4');
+    const data = ffmpeg.FS('readFile','out.mp4');
+    return new Blob([data.buffer], {type:'video/mp4'});
+  }
+
+  // ---------- export ----------
+  genBtn.addEventListener('click', async ()=>{
+    if(loadedCount()<N) return;
+    stopPreview();
+    genBtn.disabled = true;
+    genBar.classList.add('on');
+    genStatus.style.display = 'flex';
+    dlLink.classList.remove('on');
+    genFill.style.width = '0%';
+    genLabel.textContent = 'Rendering…';
+    genPct.textContent = '0%';
+
+    const dur = totalDuration();
+    const fps = 30;
+    const videoStream = cv.captureStream(fps);
+
+    // native mp4 recording where supported (Safari); otherwise webm then convert
+    let mime = 'video/mp4;codecs=avc1';
+    let nativeMp4 = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(mime);
+    if(!nativeMp4){ mime = 'video/mp4'; nativeMp4 = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(mime); }
+    if(!nativeMp4){
+      mime = 'video/webm;codecs=vp9';
+      if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
+      if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+    }
+
+    // mix in the optional mp3 track
+    let recStream = videoStream;
+    let audioCtx = null, audioSrc = null;
+    if(audioFile){
+      try{
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        const arrBuf = await audioFile.arrayBuffer();
+        const audioBuf = await audioCtx.decodeAudioData(arrBuf);
+        const dest = audioCtx.createMediaStreamDestination();
+        audioSrc = audioCtx.createBufferSource();
+        audioSrc.buffer = audioBuf;
+        audioSrc.connect(dest);
+        recStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+        audioSrc.start(0);
+      } catch(err){
+        console.error('audio mix failed, exporting silent', err);
+      }
+    }
+
+    const recorder = new MediaRecorder(recStream, {mimeType:mime, videoBitsPerSecond: 8_000_000});
+    const chunks = [];
+    recorder.ondataavailable = e=>{ if(e.data.size) chunks.push(e.data); };
+    const finished = new Promise(res=>{ recorder.onstop = res; });
+    recorder.start();
+
+    const totalFrames = Math.ceil(dur*fps);
+    for(let f=0; f<=totalFrames; f++){
+      const t = Math.min(dur - 0.001, f/fps);
+      previewT = t;
+      renderAt(t);
+      const pct = Math.round(f/totalFrames*100);
+      genFill.style.width = pct+'%';
+      genPct.textContent = pct+'%';
+      await new Promise(r=>setTimeout(r, 1000/fps));
+    }
+    recorder.stop();
+    if(audioSrc){ try{ audioSrc.stop(); }catch(e){} }
+    await finished;
+    if(audioCtx){ try{ audioCtx.close(); }catch(e){} }
+
+    const rawType = mime.includes('mp4') ? 'video/mp4' : 'video/webm';
+    const rawBlob = new Blob(chunks, {type:rawType});
+
+    let finalBlob = rawBlob, filename = 'hook-showcase.mp4';
+    if(nativeMp4){
+      genLabel.textContent = 'Done';
+      genPct.textContent = '100%';
+    } else {
+      try{
+        genLabel.textContent = 'Converting to MP4…';
+        genFill.style.width = '0%';
+        genPct.textContent = '0%';
+        finalBlob = await webmToMp4(rawBlob, pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; });
+        genLabel.textContent = 'Done';
+        genPct.textContent = '100%';
+      } catch(err){
+        console.error(err);
+        finalBlob = rawBlob;
+        filename = 'hook-showcase.webm';
+        genLabel.textContent = 'MP4 conversion unavailable — saved as WebM';
+        genPct.textContent = '';
+      }
+    }
+
+    const url = URL.createObjectURL(finalBlob);
+    dlLink.href = url;
+    dlLink.download = filename;
+    dlLink.textContent = filename.endsWith('.mp4') ? 'Download .mp4' : 'Download .webm';
+    dlLink.classList.add('on');
+    genBtn.disabled = false;
+    genBtn.textContent = 'Generate video';
+    drawPreviewFrame(0);
+  });
+
+  refreshAll();
+})();
+</script>
+</body>
+</html>
