@@ -149,7 +149,7 @@
   /* ---------- canvas preview ---------- */
   .frame{
     position:relative;
-    width:min(300px,72vw);
+    width:min(340px,80vw);
     aspect-ratio:9/16;
     background:#000;
     border:1px solid var(--line);
@@ -177,10 +177,12 @@
   .transport{
     display:flex;
     align-items:center;
-    gap:14px;
+    gap:12px;
+    width:100%;
+    max-width:340px;
   }
   .playbtn{
-    width:46px;height:46px;
+    width:40px;height:40px;
     border-radius:50%;
     border:1px solid var(--line);
     background:transparent;
@@ -188,33 +190,37 @@
     cursor:pointer;
     display:flex;align-items:center;justify-content:center;
     transition:background .15s,transform .1s;
+    flex:0 0 auto;
   }
   .playbtn:hover{background:var(--green);border-color:var(--green-bright);}
   .playbtn:active{transform:scale(0.94);}
   .timecode{
-    font-size:11px;
-    letter-spacing:0.06em;
+    font-size:10.5px;
+    letter-spacing:0.04em;
     color:rgba(242,240,230,0.55);
-    min-width:90px;
+    flex:0 0 auto;
+    white-space:nowrap;
   }
   .progressline{
     flex:1;
-    height:24px;
+    height:28px;
     position:relative;
-    max-width:220px;
     cursor:pointer;
+    min-width:0;
   }
   .progressline::before{
     content:'';
     position:absolute;
     left:0;right:0;top:50%;
-    height:2px;
-    background:var(--line);
+    height:5px;
+    border-radius:3px;
+    background:rgba(242,240,230,0.18);
     transform:translateY(-50%);
   }
   .progressline .fill{
     position:absolute;left:0;top:50%;
-    height:2px;
+    height:5px;
+    border-radius:3px;
     background:var(--green-bright);
     width:0%;
     transform:translateY(-50%);
@@ -224,13 +230,15 @@
     position:absolute;
     top:50%;
     left:0%;
-    width:12px;height:12px;
+    width:14px;height:14px;
     border-radius:50%;
     background:var(--paper);
     border:2px solid var(--green-bright);
     transform:translate(-50%,-50%);
     pointer-events:none;
+    transition:transform .1s;
   }
+  .progressline:hover .playhead{transform:translate(-50%,-50%) scale(1.25);}
 
   /* ---------- upload zone ---------- */
   .drop{
@@ -528,6 +536,43 @@
   }
   .capDur:focus{outline:none;border-color:var(--green-bright);}
 
+  /* ---------- canva-style font size stepper ---------- */
+  .stepper{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:0;
+    background:#0d0f0c;
+    border:1px solid var(--line);
+    border-radius:20px;
+    overflow:hidden;
+    width:fit-content;
+    margin-left:auto;
+  }
+  .stepper button{
+    width:26px;height:26px;
+    border:none;
+    background:transparent;
+    color:var(--paper);
+    font-size:15px;
+    line-height:1;
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:background .12s;
+  }
+  .stepper button:hover{background:rgba(31,174,102,0.18);}
+  .stepper button:active{background:rgba(31,174,102,0.32);}
+  .stepper .sval{
+    width:32px;
+    text-align:center;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--paper);
+    -moz-appearance:textfield;
+  }
+  .stepper .sval::-webkit-outer-spin-button,
+  .stepper .sval::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+
   /* ---------- toggle checkbox ---------- */
   .toggle-row{
     display:flex;
@@ -619,21 +664,35 @@
       </div>
       <div class="timing-row">
         <span>Card word size</span>
-        <input type="range" id="cardSizeRange" min="40" max="200" step="2" value="130">
-        <span class="val" id="cardSizeVal">130px</span>
+        <div class="stepper" id="cardSizeStepper" style="grid-column:2/4;">
+          <button type="button" id="cardSizeMinus">−</button>
+          <input type="number" class="sval" id="cardSizeVal" value="42">
+          <button type="button" id="cardSizePlus">+</button>
+        </div>
       </div>
       <div class="timing-row">
         <span>Caption size</span>
-        <input type="range" id="capSizeRange" min="24" max="100" step="1" value="56">
-        <span class="val" id="capSizeVal">56px</span>
+        <div class="stepper" id="capSizeStepper" style="grid-column:2/4;">
+          <button type="button" id="capSizeMinus">−</button>
+          <input type="number" class="sval" id="capSizeVal" value="30">
+          <button type="button" id="capSizePlus">+</button>
+        </div>
       </div>
       <div class="hint">"Image length" sets all showcase images at once — fine-tune any single image with the number field next to its caption below. Type captions exactly how you want them shown — nothing is auto-capitalized.</div>
     </div>
 
     <div class="field">
-      <label>Hook flash captions (act 1, optional, one per image)</label>
-      <label class="toggle-row"><input type="checkbox" id="hookWordToggle"><span>Reveal one word at a time</span></label>
-      <div id="hookCapList" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+      <label>Hook flash caption (act 1, optional, shown on every flash)</label>
+      <input type="text" id="hookCapText" placeholder="e.g. wait for it..." maxlength="60">
+      <div class="timing-row" style="margin-top:10px;grid-template-columns:1fr auto;">
+        <span>Caption size</span>
+        <div class="stepper" id="hookCapSizeStepper">
+          <button type="button" id="hookCapSizeMinus">−</button>
+          <input type="number" class="sval" id="hookCapSizeVal" value="30">
+          <button type="button" id="hookCapSizePlus">+</button>
+        </div>
+      </div>
+      <label class="toggle-row" style="margin-top:8px;"><input type="checkbox" id="hookWordToggle"><span>Reveal one word at a time</span></label>
     </div>
 
     <div class="field">
@@ -649,7 +708,7 @@
           <button class="align-btn active" data-a="left">Left</button>
           <button class="align-btn" data-a="right">Right</button>
         </div>
-        <div class="hint">League Spartan, bold, white, your exact capitalization. Drag the green dot on the preview to fine-tune exact position.</div>
+        <div class="hint">League Spartan, bold, white, your exact capitalization. Drag the green dot on the preview to fine-tune exact position — it moves whatever act (hook, card, or showcase) is currently on screen.</div>
       </div>
     </div>
 
@@ -678,7 +737,7 @@
     </div>
 
     <div class="footnote">
-      Renders entirely in-browser via Canvas + MediaRecorder. No upload, no server. Exports as MP4 where your browser supports it directly (Safari); elsewhere it's captured then converted to MP4 in-browser before download, so it opens correctly on WhatsApp and Instagram.
+      Renders entirely in-browser via Canvas + MediaRecorder. No upload, no server. Exports as MP4 where your browser supports it directly (Safari); elsewhere it's captured then converted to MP4 in-browser before download, so it opens correctly on WhatsApp and Instagram. Keep this tab open and active (don't switch tabs) while rendering — backgrounding it can stall the capture.
     </div>
 
   </div>
@@ -696,16 +755,23 @@
   let cardPos = 0;                         // 0..N — card sits after this many showcase images
   let showDur = new Array(N).fill(1.0);    // seconds per showcase image
   let captionPos = { xNorm:0.06, yNorm:0.895, align:'left' }; // anchor for showcase captions
+  let hookCaptionPos = { xNorm:0.5, yNorm:0.88 };  // anchor for hook flash caption
+  let cardTextPos = { xNorm:0.5, yNorm:0.5 };      // anchor for card word
   let previewT = 0;                        // last rendered preview time, for live-redraw on control change
-  let cardFontSize = 130;
-  let capFontSize = 56;
+  let cardFontSize = 42;
+  let capFontSize = 30;
+  let hookCapFontSize = 30;
+  // sizes are entered in Canva-like "small" units (roughly matching a ~360px-wide
+  // preview) then scaled up to the real 1080px-wide export canvas, so typing 32
+  // gives you the same relative size Canva's "32" gives you.
+  const SIZE_SCALE = W/360;
   let hookWordByWord = false;
   let showWordByWord = false;
   let audioFile = null;
 
   let images = new Array(N).fill(null); // {file, url, img}
   let captions = new Array(N).fill('');
-  let hookCaptions = new Array(N).fill('');
+  let hookCaptionText = '';
   let dragSrc = null;
 
   const fileInput = document.getElementById('fileInput');
@@ -739,13 +805,11 @@
   const alignRow = document.getElementById('alignRow');
   const capHandle = document.getElementById('capHandle');
   const frameEl = document.getElementById('frame');
-  const cardSizeRange = document.getElementById('cardSizeRange');
   const cardSizeVal = document.getElementById('cardSizeVal');
-  const capSizeRange = document.getElementById('capSizeRange');
   const capSizeVal = document.getElementById('capSizeVal');
   const hookWordToggle = document.getElementById('hookWordToggle');
   const showWordToggle = document.getElementById('showWordToggle');
-  const hookCapList = document.getElementById('hookCapList');
+  const hookCapText = document.getElementById('hookCapText');
   const audioInput = document.getElementById('audioInput');
   const audioDT = document.getElementById('audioDT');
   const audioDS = document.getElementById('audioDS');
@@ -811,16 +875,25 @@
     refreshAll();
   });
 
-  cardSizeRange.addEventListener('input', ()=>{
-    cardFontSize = +cardSizeRange.value;
-    cardSizeVal.textContent = cardFontSize+'px';
-    drawPreviewFrame(previewT);
-  });
-  capSizeRange.addEventListener('input', ()=>{
-    capFontSize = +capSizeRange.value;
-    capSizeVal.textContent = capFontSize+'px';
-    drawPreviewFrame(previewT);
-  });
+  function wireStepper(input, minusBtn, plusBtn, min, max, step, onChange){
+    function set(v){
+      v = Math.max(min, Math.min(max, Math.round(v)));
+      input.value = v;
+      onChange(v);
+    }
+    minusBtn.addEventListener('click', ()=> set((+input.value||min) - step));
+    plusBtn.addEventListener('click', ()=> set((+input.value||min) + step));
+    input.addEventListener('input', ()=>{ if(input.value!=='') onChange(Math.max(min,Math.min(max,+input.value))); });
+    input.addEventListener('blur', ()=> set(+input.value||min));
+    input.addEventListener('keydown', e=>{
+      if(e.key==='Enter') input.blur();
+      if(e.key==='ArrowUp'){ e.preventDefault(); set((+input.value||min)+step); }
+      if(e.key==='ArrowDown'){ e.preventDefault(); set((+input.value||min)-step); }
+    });
+  }
+  wireStepper(cardSizeVal, document.getElementById('cardSizeMinus'), document.getElementById('cardSizePlus'), 16, 140, 2, v=>{ cardFontSize = v; drawPreviewFrame(previewT); });
+  wireStepper(capSizeVal, document.getElementById('capSizeMinus'), document.getElementById('capSizePlus'), 10, 90, 1, v=>{ capFontSize = v; drawPreviewFrame(previewT); });
+  wireStepper(document.getElementById('hookCapSizeVal'), document.getElementById('hookCapSizeMinus'), document.getElementById('hookCapSizePlus'), 10, 90, 1, v=>{ hookCapFontSize = v; drawPreviewFrame(previewT); });
   hookWordToggle.addEventListener('change', ()=>{
     hookWordByWord = hookWordToggle.checked;
     drawPreviewFrame(previewT);
@@ -870,13 +943,30 @@
     });
   });
 
+  function activeSegType(t){
+    const segs = getSegments();
+    let acc = 0;
+    for(const s of segs){
+      if(t < acc + s.dur || s === segs[segs.length-1]) return s.type;
+      acc += s.dur;
+    }
+    return 'show';
+  }
+  function activePos(){
+    const type = activeSegType(previewT);
+    if(type === 'hook') return hookCaptionPos;
+    if(type === 'card') return cardTextPos;
+    return captionPos;
+  }
+
   function updateCapHandle(){
-    capHandle.style.left = (captionPos.xNorm*100)+'%';
-    capHandle.style.top = (captionPos.yNorm*100)+'%';
+    const pos = activePos();
+    capHandle.style.left = (pos.xNorm*100)+'%';
+    capHandle.style.top = (pos.yNorm*100)+'%';
   }
   updateCapHandle();
 
-  // drag the caption handle directly on the preview
+  // drag the caption handle directly on the preview — targets whatever act is currently shown
   (function(){
     let dragging = false;
     function setFromEvent(clientX, clientY){
@@ -885,19 +975,28 @@
       let y = (clientY - r.top)/r.height;
       x = Math.max(0.02, Math.min(0.98, x));
       y = Math.max(0.05, Math.min(0.97, y));
-      captionPos.xNorm = x; captionPos.yNorm = y;
+      const pos = activePos();
+      pos.xNorm = x; pos.yNorm = y;
       updateCapHandle();
       drawPreviewFrame(previewT);
     }
-    capHandle.addEventListener('mousedown', e=>{ dragging=true; capHandle.classList.add('dragging'); e.preventDefault(); });
+    function start(clientX, clientY){
+      dragging=true;
+      capHandle.classList.add('dragging');
+      setFromEvent(clientX, clientY);
+    }
+    capHandle.addEventListener('mousedown', e=>{ start(e.clientX,e.clientY); e.preventDefault(); e.stopPropagation(); });
+    frameEl.addEventListener('mousedown', e=>{ if(e.target===capHandle) return; start(e.clientX,e.clientY); e.preventDefault(); });
     window.addEventListener('mousemove', e=>{ if(dragging) setFromEvent(e.clientX, e.clientY); });
     window.addEventListener('mouseup', ()=>{ dragging=false; capHandle.classList.remove('dragging'); });
-    capHandle.addEventListener('touchstart', e=>{ dragging=true; capHandle.classList.add('dragging'); }, {passive:true});
+    capHandle.addEventListener('touchstart', e=>{ if(e.touches[0]) start(e.touches[0].clientX,e.touches[0].clientY); e.stopPropagation(); }, {passive:true});
+    frameEl.addEventListener('touchstart', e=>{ if(e.target===capHandle) return; if(e.touches[0]) start(e.touches[0].clientX,e.touches[0].clientY); }, {passive:true});
     window.addEventListener('touchmove', e=>{ if(dragging && e.touches[0]) setFromEvent(e.touches[0].clientX, e.touches[0].clientY); }, {passive:true});
     window.addEventListener('touchend', ()=>{ dragging=false; capHandle.classList.remove('dragging'); });
   })();
 
   cardTextInput.addEventListener('input', ()=> drawPreviewFrame(previewT));
+  hookCapText.addEventListener('input', ()=>{ hookCaptionText = hookCapText.value; drawPreviewFrame(previewT); });
 
   function refreshAll(){
     updateStripVisual();
@@ -962,7 +1061,7 @@
         e.preventDefault();
         const i = +btn.dataset.i;
         images[i] = null;
-        renderTray(); renderCaptions(); renderHookCaptions(); updateGenState(); refreshAll();
+        renderTray(); renderCaptions(); updateGenState(); refreshAll();
       });
     });
     tray.querySelectorAll('.thumb[draggable=true]').forEach(el=>{
@@ -978,13 +1077,11 @@
         const tmp = images[dst]; images[dst] = images[dragSrc]; images[dragSrc] = tmp;
         const tmpc = captions[dst]; captions[dst] = captions[dragSrc]; captions[dragSrc] = tmpc;
         const tmpd = showDur[dst]; showDur[dst] = showDur[dragSrc]; showDur[dragSrc] = tmpd;
-        const tmph = hookCaptions[dst]; hookCaptions[dst] = hookCaptions[dragSrc]; hookCaptions[dragSrc] = tmph;
         dragSrc = null;
-        renderTray(); renderCaptions(); renderHookCaptions(); refreshAll();
+        renderTray(); renderCaptions(); refreshAll();
       });
     });
     renderCaptions();
-    renderHookCaptions();
   }
 
   function renderCaptions(){
@@ -1006,19 +1103,6 @@
         showDur[+inp.dataset.i] = v;
         refreshAll();
       });
-    });
-  }
-
-  function renderHookCaptions(){
-    hookCapList.innerHTML = '';
-    for(let i=0;i<N;i++){
-      const row = document.createElement('div');
-      row.className = 'cap-row';
-      row.innerHTML = `<span class="idx">${i+1}</span><input type="text" class="hookCapText" data-i="${i}" placeholder="${images[i] ? 'flash caption '+(i+1)+' (optional)' : '— empty slot —'}" value="${hookCaptions[i]||''}" maxlength="60" style="flex:1;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;">`;
-      hookCapList.appendChild(row);
-    }
-    hookCapList.querySelectorAll('.hookCapText').forEach(inp=>{
-      inp.addEventListener('input', e=>{ hookCaptions[+inp.dataset.i] = inp.value; drawPreviewFrame(previewT); });
     });
   }
 
@@ -1085,18 +1169,19 @@
       ctx.stroke();
     }
 
-    const res = drawWordByWord(text, localT, dur, cardFontSize, W/2, H/2, 'center');
+    const cx = cardTextPos.xNorm*W, cy = cardTextPos.yNorm*H;
+    const res = drawWordByWord(text, localT, dur, cardFontSize*SIZE_SCALE, cx, cy, 'center');
     if(!res) return;
     const { words, wIdx, fontSizeUsed } = res;
 
     // word progress dots
     const dotGap = 18, dotR = 5;
     const totalW = (words.length-1)*dotGap;
-    const startX = W/2 - totalW/2;
+    const startX = cx - totalW/2;
     for(let i=0;i<words.length;i++){
       ctx.beginPath();
       ctx.fillStyle = i===wIdx ? '#1fae66' : 'rgba(242,240,230,0.25)';
-      ctx.arc(startX + i*dotGap, H/2 + fontSizeUsed*0.62, i===wIdx?6:dotR, 0, Math.PI*2);
+      ctx.arc(startX + i*dotGap, cy + fontSizeUsed*0.62, i===wIdx?6:dotR, 0, Math.PI*2);
       ctx.fill();
     }
   }
@@ -1131,16 +1216,16 @@
       ctx.fillRect(0, Math.max(0,y-bandH), W, bandH*2);
 
       if(showWordByWord){
-        drawWordByWord(caption, localT||0, dur, capFontSize, x, y, align);
+        drawWordByWord(caption, localT||0, dur, capFontSize*SIZE_SCALE, x, y, align);
       } else {
-        ctx.font = `800 ${capFontSize}px 'League Spartan', Archivo, Arial, sans-serif`;
+        ctx.font = `800 ${capFontSize*SIZE_SCALE}px 'League Spartan', Archivo, Arial, sans-serif`;
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = align;
         ctx.textBaseline = 'middle';
         let xClamped = x;
         if(align==='left') xClamped = Math.max(48, x);
         if(align==='right') xClamped = Math.min(W-48, x);
-        wrapTextAligned(caption, xClamped, y, W*0.86, capFontSize*1.1, 3, align);
+        wrapTextAligned(caption, xClamped, y, W*0.86, capFontSize*SIZE_SCALE*1.1, 3, align);
       }
     }
   }
@@ -1169,7 +1254,7 @@
     ctx.strokeRect(7,7,W-14,H-14);
 
     if(caption){
-      const x = W/2, y = H*0.88;
+      const x = hookCaptionPos.xNorm*W, y = hookCaptionPos.yNorm*H;
       const bandH = 220;
       const grad = ctx.createLinearGradient(0, y-bandH, 0, y+bandH);
       grad.addColorStop(0, 'rgba(5,8,6,0)');
@@ -1179,13 +1264,13 @@
       ctx.fillRect(0, Math.max(0,y-bandH), W, bandH*2);
 
       if(hookWordByWord){
-        drawWordByWord(caption, localT||0, dur, Math.min(capFontSize, 64), x, y, 'center');
+        drawWordByWord(caption, localT||0, dur, hookCapFontSize*SIZE_SCALE, x, y, 'center');
       } else {
-        ctx.font = `800 ${Math.min(capFontSize,48)}px 'League Spartan', Archivo, Arial, sans-serif`;
+        ctx.font = `800 ${hookCapFontSize*SIZE_SCALE}px 'League Spartan', Archivo, Arial, sans-serif`;
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        wrapTextAligned(caption, x, y, W*0.86, Math.min(capFontSize,48)*1.1, 2, 'center');
+        wrapTextAligned(caption, x, y, W*0.86, hookCapFontSize*SIZE_SCALE*1.1, 2, 'center');
       }
     }
   }
@@ -1197,7 +1282,7 @@
     for(const s of segs){
       if(t < acc + s.dur || s === segs[segs.length-1]){
         const local = t - acc;
-        if(s.type === 'hook'){ if(images[s.idx]) drawHookFlash(images[s.idx].img, hookCaptions[s.idx], Math.max(0,local), s.dur); }
+        if(s.type === 'hook'){ if(images[s.idx]) drawHookFlash(images[s.idx].img, hookCaptionText, Math.max(0,t), hookDur*N); }
         else if(s.type === 'card'){ drawCard(cardTextInput.value, Math.max(0,local), s.dur); }
         else { if(images[s.idx]) drawShowcase(images[s.idx].img, captions[s.idx], s.idx, s.dur, Math.max(0,local)); }
         return;
@@ -1210,6 +1295,7 @@
     if(loadedCount()<N) return;
     previewT = t;
     renderAt(t);
+    updateCapHandle();
   }
 
   // ---------- preview playback ----------
@@ -1286,7 +1372,7 @@
     ffmpeg.setProgress(({ ratio })=>{ if(ratio>=0) onProgress(Math.round(ratio*100)); });
     if(!ffmpeg.isLoaded()) await ffmpeg.load();
     ffmpeg.FS('writeFile', 'in.webm', await fetchFile(webmBlob));
-    await ffmpeg.run('-i','in.webm','-c:v','libx264','-pix_fmt','yuv420p','-preset','veryfast','-crf','23','-c:a','aac','-b:a','160k','-movflags','+faststart','out.mp4');
+    await ffmpeg.run('-i','in.webm','-r','30','-c:v','libx264','-profile:v','baseline','-level','3.1','-pix_fmt','yuv420p','-preset','veryfast','-crf','23','-c:a','aac','-ar','44100','-b:a','160k','-movflags','+faststart','out.mp4');
     const data = ffmpeg.FS('readFile','out.mp4');
     return new Blob([data.buffer], {type:'video/mp4'});
   }
@@ -1342,14 +1428,18 @@
     const finished = new Promise(res=>{ recorder.onstop = res; });
     recorder.start();
 
-    const totalFrames = Math.ceil(dur*fps);
-    for(let f=0; f<=totalFrames; f++){
-      const t = Math.min(dur - 0.001, f/fps);
+    const track = videoStream.getVideoTracks()[0];
+    const exportStart = performance.now();
+    let lastPct = -1;
+    while(true){
+      const elapsed = (performance.now() - exportStart) / 1000;
+      const t = Math.min(dur - 0.001, elapsed);
       previewT = t;
       renderAt(t);
-      const pct = Math.round(f/totalFrames*100);
-      genFill.style.width = pct+'%';
-      genPct.textContent = pct+'%';
+      if(track.requestFrame) track.requestFrame();
+      const pct = Math.min(100, Math.round((t/dur)*100));
+      if(pct !== lastPct){ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; lastPct = pct; }
+      if(elapsed >= dur) break;
       await new Promise(r=>setTimeout(r, 1000/fps));
     }
     recorder.stop();
