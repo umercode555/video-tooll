@@ -152,8 +152,6 @@
     width:min(340px,80vw);
     aspect-ratio:9/16;
     background:#000;
-    border:1px solid var(--line);
-    border-radius:6px;
     overflow:hidden;
     box-shadow:0 40px 80px -30px rgba(0,0,0,0.8);
   }
@@ -435,6 +433,7 @@
   .timing-row:last-child{margin-bottom:0;}
   .timing-row input[type=range]{
     -webkit-appearance:none;
+    appearance:none;
     width:100%;
     height:2px;
     background:var(--line);
@@ -569,6 +568,7 @@
     font-size:11px;
     color:var(--paper);
     -moz-appearance:textfield;
+    appearance:textfield;
   }
   .stepper .sval::-webkit-outer-spin-button,
   .stepper .sval::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
@@ -628,6 +628,21 @@
   </div>
 
   <div class="panel">
+
+    <div class="field" id="tmplPanel" style="border:1px solid var(--green-bright);border-radius:6px;padding:12px;">
+      <label>Template</label>
+      <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
+        Saves everything — images, captions, positions, font sizes, timing, card position, alignment. One click brings the whole project back.
+      </div>
+      <button type="button" id="tmplRestoreBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:8px;">↺ Restore last saved template</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="align-btn" id="tmplSaveBtn" type="button">Save template</button>
+        <button class="align-btn" id="tmplExportBtn" type="button">Export .json</button>
+        <button class="align-btn" id="tmplImportBtn" type="button">Import .json</button>
+        <input type="file" id="tmplImportFile" accept="application/json" style="display:none;">
+      </div>
+      <div id="tmplStatus" style="font-size:9.5px;color:var(--green-bright);margin-top:8px;min-height:12px;"></div>
+    </div>
 
     <div>
       <label for="fileInput" class="drop" id="dropZone">
@@ -736,6 +751,15 @@
       <a href="#" class="dl" id="dlLink" download="hook-showcase.mp4">Download video</a>
     </div>
 
+    <div class="field" id="galleryPanel">
+      <label>Video gallery</label>
+      <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
+        Every video you generate is kept here automatically.
+      </div>
+      <div id="videoGallery" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <div id="galleryEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No videos generated yet.</div>
+    </div>
+
     <div class="footnote">
       Renders entirely in-browser via Canvas + MediaRecorder. No upload, no server. Exports as MP4 where your browser supports it directly (Safari); elsewhere it's captured then converted to MP4 in-browser before download, so it opens correctly on WhatsApp and Instagram. Keep this tab open and active (don't switch tabs) while rendering — backgrounding it can stall the capture.
     </div>
@@ -755,7 +779,7 @@
   let cardPos = 0;                         // 0..N — card sits after this many showcase images
   let showDur = new Array(N).fill(1.0);    // seconds per showcase image
   let captionPos = { xNorm:0.06, yNorm:0.895, align:'left' }; // anchor for showcase captions
-  let hookCaptionPos = { xNorm:0.5, yNorm:0.88 };  // anchor for hook flash caption
+  let hookCaptionPos = { xNorm:0.5, yNorm:0.88, align:'center' };  // anchor for hook flash caption
   let cardTextPos = { xNorm:0.5, yNorm:0.5 };      // anchor for card word
   let previewT = 0;                        // last rendered preview time, for live-redraw on control change
   let cardFontSize = 42;
@@ -814,6 +838,14 @@
   const audioDT = document.getElementById('audioDT');
   const audioDS = document.getElementById('audioDS');
   const audioRemove = document.getElementById('audioRemove');
+  const tmplSaveBtn = document.getElementById('tmplSaveBtn');
+  const tmplRestoreBtn = document.getElementById('tmplRestoreBtn');
+  const tmplExportBtn = document.getElementById('tmplExportBtn');
+  const tmplImportBtn = document.getElementById('tmplImportBtn');
+  const tmplImportFile = document.getElementById('tmplImportFile');
+  const tmplStatus = document.getElementById('tmplStatus');
+  const videoGallery = document.getElementById('videoGallery');
+  const galleryEmpty = document.getElementById('galleryEmpty');
   const progressLine = document.getElementById('progressLine');
   const playhead = document.getElementById('playhead');
 
@@ -923,20 +955,18 @@
   alignRow.querySelectorAll('.align-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const a = btn.dataset.a;
-      if(a==='top') captionPos.yNorm = 0.14;
-      else if(a==='center') captionPos.yNorm = 0.5;
-      else if(a==='bottom') captionPos.yNorm = 0.895;
-      else if(a==='left'){ captionPos.align='left'; captionPos.xNorm = 0.06; }
-      else if(a==='right'){ captionPos.align='right'; captionPos.xNorm = 0.94; }
+      const pos = activePos(); // apply to whichever act (hook / card / showcase) is on screen right now
+      if(a==='top') pos.yNorm = 0.14;
+      else if(a==='center') pos.yNorm = 0.5;
+      else if(a==='bottom') pos.yNorm = 0.895;
+      else if(a==='left'){ pos.align='left'; pos.xNorm = 0.06; }
+      else if(a==='right'){ pos.align='right'; pos.xNorm = 0.94; }
       if(a==='top'||a==='center'||a==='bottom'){
         alignRow.querySelectorAll('.align-btn').forEach(b=>{ if(['top','center','bottom'].includes(b.dataset.a)) b.classList.remove('active'); });
         btn.classList.add('active');
       } else {
         alignRow.querySelectorAll('.align-btn').forEach(b=>{ if(['left','right'].includes(b.dataset.a)) b.classList.remove('active'); });
         btn.classList.add('active');
-        if(a==='left' || a==='right'){
-          // center wasn't explicitly toggled off if user only picks left/right; also un-set center-h implied
-        }
       }
       updateCapHandle();
       drawPreviewFrame(previewT);
@@ -1123,6 +1153,305 @@
   renderTray();
   updateStripVisual();
 
+  // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
+  const IDB_NAME = 'hookShowcaseDB';
+  const IDB_VERSION = 1;
+  function openDB(){
+    return new Promise((resolve,reject)=>{
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if(!db.objectStoreNames.contains('templates')) db.createObjectStore('templates');
+        if(!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath:'id', autoIncrement:true });
+      };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function idbPut(storeName, value, key){
+    const db = await openDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(storeName,'readwrite');
+      const store = tx.objectStore(storeName);
+      const req = key!==undefined ? store.put(value,key) : store.put(value);
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function idbGet(storeName, key){
+    const db = await openDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(storeName,'readonly');
+      const req = tx.objectStore(storeName).get(key);
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function idbGetAll(storeName){
+    const db = await openDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(storeName,'readonly');
+      const req = tx.objectStore(storeName).getAll();
+      req.onsuccess = ()=>resolve(req.result || []);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function idbDelete(storeName, key){
+    const db = await openDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(storeName,'readwrite');
+      const req = tx.objectStore(storeName).delete(key);
+      req.onsuccess = ()=>resolve();
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+
+  // ---------- template save / load ----------
+  // Saves EVERYTHING: the 10 images, all captions, and every style setting
+  // (positions, font sizes, timing, card position, alignment, word-reveal
+  // toggles). One save/restore brings the whole project back exactly as
+  // it was — image files included, stored as real Blobs in IndexedDB
+  // (not localStorage, which is far too small to hold images).
+  const TEMPLATE_KEY = 'current';
+
+  async function collectTemplate(){
+    return {
+      _v: 2,
+      hookDur, cardDur, cardPos,
+      showDur: showDur.slice(),
+      captionPos: { ...captionPos },
+      hookCaptionPos: { ...hookCaptionPos },
+      cardTextPos: { ...cardTextPos },
+      cardFontSize, capFontSize, hookCapFontSize,
+      hookWordByWord, showWordByWord,
+      cardTextValue: cardTextInput.value,
+      hookCaptionTextValue: hookCapText.value,
+      captions: captions.slice(),
+      images: images.map(slot => slot ? slot.file : null) // File objects are Blobs — store directly
+    };
+  }
+
+  async function applyTemplate(t){
+    if(!t || typeof t !== 'object') throw new Error('not a valid template file');
+
+    hookDur = typeof t.hookDur === 'number' ? t.hookDur : hookDur;
+    cardDur = typeof t.cardDur === 'number' ? t.cardDur : cardDur;
+    cardPos = typeof t.cardPos === 'number' ? t.cardPos : cardPos;
+    if(Array.isArray(t.showDur) && t.showDur.length === N) showDur = t.showDur.slice();
+    if(t.captionPos) captionPos = { ...captionPos, ...t.captionPos };
+    if(t.hookCaptionPos) hookCaptionPos = { ...hookCaptionPos, ...t.hookCaptionPos };
+    if(t.cardTextPos) cardTextPos = { ...cardTextPos, ...t.cardTextPos };
+    if(typeof t.cardFontSize === 'number') cardFontSize = t.cardFontSize;
+    if(typeof t.capFontSize === 'number') capFontSize = t.capFontSize;
+    if(typeof t.hookCapFontSize === 'number') hookCapFontSize = t.hookCapFontSize;
+    if(typeof t.hookWordByWord === 'boolean') hookWordByWord = t.hookWordByWord;
+    if(typeof t.showWordByWord === 'boolean') showWordByWord = t.showWordByWord;
+    if(Array.isArray(t.captions) && t.captions.length === N) captions = t.captions.slice();
+
+    // reflect every value back into the actual UI controls, so what's on
+    // screen always matches what was loaded
+    hookDurRange.value = hookDur;
+    hookDurVal.textContent = hookDur.toFixed(2)+'s';
+    cardDurRange.value = cardDur;
+    cardDurVal.textContent = cardDur.toFixed(1)+'s';
+    buildCardPosOptions();
+    cardPosSelect.value = cardPos;
+    showDurRange.value = showDur[0] || 1;
+    showDurVal.textContent = (showDur[0]||1).toFixed(1)+'s';
+
+    cardSizeVal.value = cardFontSize;
+    capSizeVal.value = capFontSize;
+    document.getElementById('hookCapSizeVal').value = hookCapFontSize;
+
+    hookWordToggle.checked = hookWordByWord;
+    showWordToggle.checked = showWordByWord;
+
+    if(typeof t.cardTextValue === 'string') cardTextInput.value = t.cardTextValue;
+    if(typeof t.hookCaptionTextValue === 'string'){
+      hookCapText.value = t.hookCaptionTextValue;
+      hookCaptionText = t.hookCaptionTextValue;
+    }
+
+    // align buttons: reflect vertical position + horizontal align of
+    // whichever act is currently on screen (showcase captions by default)
+    alignRow.querySelectorAll('.align-btn').forEach(b=>b.classList.remove('active'));
+    const vGuess = captionPos.yNorm < 0.3 ? 'top' : captionPos.yNorm > 0.7 ? 'bottom' : 'center';
+    const hGuess = captionPos.align === 'right' ? 'right' : 'left';
+    alignRow.querySelector(`.align-btn[data-a="${vGuess}"]`)?.classList.add('active');
+    alignRow.querySelector(`.align-btn[data-a="${hGuess}"]`)?.classList.add('active');
+
+    // restore images (real File blobs) if the template has them
+    if(Array.isArray(t.images) && t.images.length === N){
+      const loaded = await Promise.all(t.images.map(file=>{
+        if(!file) return Promise.resolve(null);
+        return new Promise(resolve=>{
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = ()=> resolve({ file, url, img });
+          img.onerror = ()=> resolve(null);
+          img.src = url;
+        });
+      }));
+      images = loaded;
+    }
+
+    renderTray();
+    renderCaptions();
+    updateGenState();
+    updateCapHandle();
+    refreshAll();
+  }
+
+  async function saveTemplateToStorage(){
+    try{
+      await idbPut('templates', await collectTemplate(), TEMPLATE_KEY);
+      return true;
+    } catch(err){ console.error('template save failed', err); return false; }
+  }
+
+  function showTmplStatus(msg, isError){
+    tmplStatus.textContent = msg;
+    tmplStatus.style.color = isError ? '#e05a4a' : 'var(--green-bright)';
+    clearTimeout(showTmplStatus._t);
+    showTmplStatus._t = setTimeout(()=>{ tmplStatus.textContent=''; }, 5000);
+  }
+
+  tmplSaveBtn.addEventListener('click', async ()=>{
+    tmplSaveBtn.disabled = true; tmplSaveBtn.textContent = 'Saving…';
+    const ok = await saveTemplateToStorage();
+    tmplSaveBtn.disabled = false; tmplSaveBtn.textContent = 'Save template';
+    showTmplStatus(ok ? 'Saved — images, captions, and every setting.' : 'Save failed.', !ok);
+  });
+
+  tmplRestoreBtn.addEventListener('click', async ()=>{
+    tmplRestoreBtn.disabled = true; tmplRestoreBtn.textContent = 'Restoring…';
+    try{
+      const t = await idbGet('templates', TEMPLATE_KEY);
+      if(!t){ showTmplStatus('No saved template yet — click "Save template" first.', true); }
+      else{ await applyTemplate(t); showTmplStatus('Template restored — images, captions, everything.'); }
+    } catch(err){
+      console.error(err);
+      showTmplStatus('Restore failed.', true);
+    }
+    tmplRestoreBtn.disabled = false; tmplRestoreBtn.textContent = '↺ Restore last saved template';
+  });
+
+  tmplExportBtn.addEventListener('click', async ()=>{
+    // JSON can't hold binary images efficiently, so export packs images as
+    // base64 inside the JSON — fully portable to a re-downloaded copy of
+    // this tool, at the cost of a larger file.
+    const t = await collectTemplate();
+    const packed = { ...t, images: await Promise.all(t.images.map(file=> file ? blobToDataURL(file) : null)) };
+    const blob = new Blob([JSON.stringify(packed)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'hook-showcase-template.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    showTmplStatus('Template exported with images — works in a re-downloaded copy of this tool too.');
+  });
+
+  function blobToDataURL(blob){
+    return new Promise((resolve,reject)=>{
+      const r = new FileReader();
+      r.onload = ()=>resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  }
+  function dataURLToBlob(dataURL){
+    const [head, b64] = dataURL.split(',');
+    const mime = /data:(.*?);base64/.exec(head)[1];
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], {type:mime});
+  }
+
+  tmplImportBtn.addEventListener('click', ()=> tmplImportFile.click());
+  tmplImportFile.addEventListener('change', async e=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    try{
+      const text = await f.text();
+      const raw = JSON.parse(text);
+      // unpack base64 images back into real File blobs
+      const unpacked = {
+        ...raw,
+        images: Array.isArray(raw.images)
+          ? raw.images.map((d,i)=> d ? new File([dataURLToBlob(d)], `image-${i+1}.jpg`, {type: dataURLToBlob(d).type}) : null)
+          : new Array(N).fill(null)
+      };
+      await applyTemplate(unpacked);
+      await saveTemplateToStorage();
+      showTmplStatus('Template imported — images, captions, everything loaded.');
+    } catch(err){
+      console.error(err);
+      showTmplStatus('Could not read that file — is it a template .json exported from this tool?', true);
+    }
+    tmplImportFile.value = '';
+  });
+
+  // auto-restore on open, if this exact file/origin has a saved template
+  (async function autoRestoreTemplate(){
+    try{
+      const t = await idbGet('templates', TEMPLATE_KEY);
+      if(!t) return;
+      await applyTemplate(t);
+      showTmplStatus('Restored your last saved template.');
+    } catch(err){ console.error('template auto-restore failed', err); }
+  })();
+
+  // ---------- video gallery ----------
+  // Every video you generate is kept here (IndexedDB) automatically —
+  // Video 1, Video 2, Video 3... with play / download / delete.
+  let galleryObjectUrls = [];
+  async function nextVideoName(){
+    const all = await idbGetAll('videos');
+    let max = 0;
+    for(const v of all){
+      const m = /^Video (\d+)$/.exec(v.name||'');
+      if(m) max = Math.max(max, +m[1]);
+    }
+    return `Video ${max+1}`;
+  }
+  async function saveVideoToGallery(blob){
+    const name = await nextVideoName();
+    await idbPut('videos', { name, blob, createdAt: Date.now() });
+    await renderGallery();
+  }
+  async function renderGallery(){
+    galleryObjectUrls.forEach(u=>URL.revokeObjectURL(u));
+    galleryObjectUrls = [];
+    const all = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
+    videoGallery.innerHTML = '';
+    galleryEmpty.style.display = all.length ? 'none' : 'block';
+    for(const v of all){
+      const url = URL.createObjectURL(v.blob);
+      galleryObjectUrls.push(url);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;';
+      const dt = new Date(v.createdAt);
+      row.innerHTML = `
+        <video src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;" preload="metadata"></video>
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}</div>
+          <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        <a href="${url}" download="${v.name.replace(/\s+/g,'-').toLowerCase()}.mp4" class="align-btn" style="text-decoration:none;padding:6px 8px;">Download</a>
+        <button type="button" class="align-btn" data-del="${v.id}" style="padding:6px 8px;">Delete</button>
+      `;
+      videoGallery.appendChild(row);
+    }
+    videoGallery.querySelectorAll('[data-del]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        await idbDelete('videos', +btn.dataset.del);
+        await renderGallery();
+      });
+    });
+  }
+  renderGallery();
+
   // ---------- drawing ----------
   function coverDraw(img, x, y, w, h){
     const ir = img.width/img.height, r = w/h;
@@ -1159,47 +1488,16 @@
   function drawCard(text, localT, dur){
     ctx.fillStyle = '#0e3d24';
     ctx.fillRect(0,0,W,H);
-    // faint texture lines
-    ctx.strokeStyle = 'rgba(31,174,102,0.12)';
-    ctx.lineWidth = 2;
-    for(let i=0;i<10;i++){
-      ctx.beginPath();
-      ctx.moveTo(0, i*H/10 + 40);
-      ctx.lineTo(W, i*H/10 + 40);
-      ctx.stroke();
-    }
 
     const cx = cardTextPos.xNorm*W, cy = cardTextPos.yNorm*H;
     const res = drawWordByWord(text, localT, dur, cardFontSize*SIZE_SCALE, cx, cy, 'center');
     if(!res) return;
-    const { words, wIdx, fontSizeUsed } = res;
-
-    // word progress dots
-    const dotGap = 18, dotR = 5;
-    const totalW = (words.length-1)*dotGap;
-    const startX = cx - totalW/2;
-    for(let i=0;i<words.length;i++){
-      ctx.beginPath();
-      ctx.fillStyle = i===wIdx ? '#1fae66' : 'rgba(242,240,230,0.25)';
-      ctx.arc(startX + i*dotGap, cy + fontSizeUsed*0.62, i===wIdx?6:dotR, 0, Math.PI*2);
-      ctx.fill();
-    }
   }
 
   function drawShowcase(img, caption, idx, dur, localT){
     ctx.fillStyle = '#050806';
     ctx.fillRect(0,0,W,H);
     coverDraw(img, 0, 0, W, H);
-
-    // index tag, top-left, out of the way of a movable caption
-    ctx.font = '600 26px "SF Mono", monospace';
-    ctx.fillStyle = '#1fae66';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.shadowColor = 'rgba(0,0,0,0.6)';
-    ctx.shadowBlur = 10;
-    ctx.fillText(String(idx+1).padStart(2,'0') + ' / ' + String(N).padStart(2,'0'), 48, 82);
-    ctx.shadowBlur = 0;
 
     if(caption){
       const x = captionPos.xNorm * W;
@@ -1218,16 +1516,26 @@
       if(showWordByWord){
         drawWordByWord(caption, localT||0, dur, capFontSize*SIZE_SCALE, x, y, align);
       } else {
-        ctx.font = `800 ${capFontSize*SIZE_SCALE}px 'League Spartan', Archivo, Arial, sans-serif`;
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = align;
-        ctx.textBaseline = 'middle';
         let xClamped = x;
         if(align==='left') xClamped = Math.max(48, x);
         if(align==='right') xClamped = Math.min(W-48, x);
-        wrapTextAligned(caption, xClamped, y, W*0.86, capFontSize*SIZE_SCALE*1.1, 3, align);
+        drawOneLine(caption, xClamped, y, W*0.86, capFontSize*SIZE_SCALE, align);
       }
     }
+  }
+
+  // Forces caption onto exactly one line — shrinks font instead of wrapping.
+  function drawOneLine(text, x, y, maxWidth, fontSize, align){
+    let fs = fontSize;
+    ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
+    while(ctx.measureText(text).width > maxWidth && fs > 18){
+      fs -= 2;
+      ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
   }
 
   function wrapTextAligned(text, x, y, maxWidth, lineHeight, maxLines, align){
@@ -1248,13 +1556,10 @@
     ctx.fillStyle = '#000';
     ctx.fillRect(0,0,W,H);
     coverDraw(img, 0, 0, W, H);
-    // hard vignette flash edge for kinetic feel
-    ctx.strokeStyle = 'rgba(242,240,230,0.8)';
-    ctx.lineWidth = 14;
-    ctx.strokeRect(7,7,W-14,H-14);
 
     if(caption){
       const x = hookCaptionPos.xNorm*W, y = hookCaptionPos.yNorm*H;
+      const align = hookCaptionPos.align || 'center';
       const bandH = 220;
       const grad = ctx.createLinearGradient(0, y-bandH, 0, y+bandH);
       grad.addColorStop(0, 'rgba(5,8,6,0)');
@@ -1263,14 +1568,14 @@
       ctx.fillStyle = grad;
       ctx.fillRect(0, Math.max(0,y-bandH), W, bandH*2);
 
+      let xClamped = x;
+      if(align==='left') xClamped = Math.max(48, x);
+      if(align==='right') xClamped = Math.min(W-48, x);
+
       if(hookWordByWord){
-        drawWordByWord(caption, localT||0, dur, hookCapFontSize*SIZE_SCALE, x, y, 'center');
+        drawWordByWord(caption, localT||0, dur, hookCapFontSize*SIZE_SCALE, xClamped, y, align);
       } else {
-        ctx.font = `800 ${hookCapFontSize*SIZE_SCALE}px 'League Spartan', Archivo, Arial, sans-serif`;
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        wrapTextAligned(caption, x, y, W*0.86, hookCapFontSize*SIZE_SCALE*1.1, 2, 'center');
+        drawOneLine(caption, xClamped, y, W*0.86, hookCapFontSize*SIZE_SCALE, align);
       }
     }
   }
@@ -1354,7 +1659,15 @@
     window.addEventListener('touchend', ()=>{ scrubbing=false; });
   })();
 
-  // ---------- MP4 conversion helper (ffmpeg.wasm, loaded on demand) ----------
+  // ---------- export: WebCodecs + mp4-muxer (frame-accurate, real MP4) ----------
+  // This is the same architecture Canva / CapCut / Kapwing's browser editors use:
+  // draw each frame deterministically, hand it straight to the H.264 hardware
+  // encoder (VideoEncoder), and mux the encoded chunks into an MP4 container
+  // (mp4-muxer) — no screen-recording step, no MediaRecorder, no ffmpeg.wasm.
+  // That removes every symptom reported: banding/compression artifacts on
+  // flat colors, frozen first frame, and duration drift, because nothing is
+  // captured in real time — every frame is rendered, encoded, and placed at
+  // its exact timestamp.
   function loadScriptOnce(src){
     return new Promise((resolve,reject)=>{
       if(document.querySelector(`script[data-src="${src}"]`)){ resolve(); return; }
@@ -1365,16 +1678,217 @@
       document.head.appendChild(s);
     });
   }
-  async function webmToMp4(webmBlob, onProgress){
-    await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
+  const MUXER_CDNS = [
+    'https://unpkg.com/mp4-muxer@5/build/mp4-muxer.min.js',
+    'https://cdn.jsdelivr.net/npm/mp4-muxer@5/build/mp4-muxer.min.js'
+  ];
+  async function loadMuxer(){
+    if(window.Mp4Muxer) return;
+    let lastErr;
+    for(const src of MUXER_CDNS){
+      try{ await loadScriptOnce(src); if(window.Mp4Muxer) return; }
+      catch(err){ lastErr = err; }
+    }
+    throw lastErr || new Error('mp4-muxer failed to load from all CDNs');
+  }
+
+  function webCodecsSupported(){
+    return typeof window.VideoEncoder === 'function' && typeof window.VideoFrame === 'function';
+  }
+
+  async function encodeWithWebCodecs(dur, fps, onProgress){
+    await loadMuxer();
+    const { Muxer, ArrayBufferTarget } = window.Mp4Muxer;
+
+    const totalFrames = Math.max(1, Math.round(dur * fps));
+
+    // ---- optional audio track: decode the mp3 fully up front ----
+    let audioBuf = null, audioCtxTmp = null;
+    if(audioFile){
+      try{
+        audioCtxTmp = new (window.AudioContext||window.webkitAudioContext)();
+        const arrBuf = await audioFile.arrayBuffer();
+        audioBuf = await audioCtxTmp.decodeAudioData(arrBuf);
+      } catch(err){
+        console.error('audio decode failed, exporting silent', err);
+        audioBuf = null;
+      }
+    }
+    const hasAudio = !!audioBuf;
+    const audioSampleRate = hasAudio ? audioBuf.sampleRate : 44100;
+    const audioChannels = hasAudio ? Math.min(2, audioBuf.numberOfChannels) : 2;
+
+    const muxer = new Muxer({
+      target: new ArrayBufferTarget(),
+      video: { codec:'avc', width:W, height:H },
+      audio: hasAudio ? { codec:'aac', numberOfChannels:audioChannels, sampleRate:audioSampleRate } : undefined,
+      fastStart: 'in-memory',
+      firstTimestampBehavior: 'offset'
+    });
+
+    const videoEncoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: e => console.error('video encode error', e)
+    });
+    videoEncoder.configure({
+      codec: 'avc1.640033', // H.264 High profile, level 5.1 — broad WhatsApp/Instagram compatibility
+      width: W, height: H,
+      bitrate: 10_000_000,
+      framerate: fps
+    });
+
+    let audioEncoder = null;
+    if(hasAudio){
+      audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+        error: e => console.error('audio encode error', e)
+      });
+      audioEncoder.configure({
+        codec: 'mp4a.40.2', // AAC-LC
+        numberOfChannels: audioChannels,
+        sampleRate: audioSampleRate,
+        bitrate: 160_000
+      });
+    }
+
+    const frameDurationUs = Math.round(1_000_000 / fps);
+    for(let i=0;i<totalFrames;i++){
+      const t = Math.min(dur - 0.0001, i / fps);
+      previewT = t;
+      renderAt(t);
+      const frame = new VideoFrame(cv, { timestamp: i * frameDurationUs, duration: frameDurationUs });
+      videoEncoder.encode(frame, { keyFrame: (i % (fps*2) === 0) });
+      frame.close();
+
+      const pct = Math.min(60, Math.round((i/totalFrames)*60));
+      onProgress(pct);
+
+      // yield periodically so the encoder queue can drain and the tab stays responsive
+      if(i % 4 === 0) await new Promise(r=>setTimeout(r, 0));
+    }
+    await videoEncoder.flush();
+    videoEncoder.close();
+
+    if(hasAudio && audioEncoder){
+      const samplesNeeded = Math.min(audioBuf.length, Math.round(dur * audioSampleRate));
+      const chunkSize = 1024;
+      const planar = [];
+      for(let ch=0; ch<audioChannels; ch++){
+        planar.push(audioBuf.getChannelData(Math.min(ch, audioBuf.numberOfChannels-1)));
+      }
+      for(let start=0; start<samplesNeeded; start+=chunkSize){
+        const len = Math.min(chunkSize, samplesNeeded - start);
+        const interleaved = new Float32Array(len * audioChannels);
+        for(let ch=0; ch<audioChannels; ch++){
+          for(let s=0; s<len; s++){
+            interleaved[s*audioChannels + ch] = planar[ch][start+s] || 0;
+          }
+        }
+        const audioData = new AudioData({
+          format: 'f32',
+          sampleRate: audioSampleRate,
+          numberOfFrames: len,
+          numberOfChannels: audioChannels,
+          timestamp: Math.round((start/audioSampleRate) * 1_000_000),
+          data: interleaved
+        });
+        audioEncoder.encode(audioData);
+        audioData.close();
+      }
+      await audioEncoder.flush();
+      audioEncoder.close();
+    }
+    if(audioCtxTmp){ try{ audioCtxTmp.close(); }catch(e){} }
+
+    onProgress(90);
+    muxer.finalize();
+    const { buffer } = muxer.target;
+    return new Blob([buffer], { type:'video/mp4' });
+  }
+
+  // ---------- fallback: MediaRecorder + ffmpeg.wasm (older browsers only) ----------
+  const FFMPEG_CDNS = [
+    'https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js',
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js'
+  ];
+  async function loadFfmpegScript(){
+    let lastErr;
+    for(const src of FFMPEG_CDNS){
+      try{ await loadScriptOnce(src); if(window.FFmpeg) return; }
+      catch(err){ lastErr = err; }
+    }
+    throw lastErr || new Error('ffmpeg script failed to load from all CDNs');
+  }
+  async function webmToMp4(webmBlob, exactDuration, onProgress){
+    await loadFfmpegScript();
     const { createFFmpeg, fetchFile } = window.FFmpeg;
     const ffmpeg = createFFmpeg({ log:false });
     ffmpeg.setProgress(({ ratio })=>{ if(ratio>=0) onProgress(Math.round(ratio*100)); });
     if(!ffmpeg.isLoaded()) await ffmpeg.load();
     ffmpeg.FS('writeFile', 'in.webm', await fetchFile(webmBlob));
-    await ffmpeg.run('-i','in.webm','-r','30','-c:v','libx264','-profile:v','baseline','-level','3.1','-pix_fmt','yuv420p','-preset','veryfast','-crf','23','-c:a','aac','-ar','44100','-b:a','160k','-movflags','+faststart','out.mp4');
+    await ffmpeg.run(
+      '-fflags','+genpts','-i','in.webm','-t', String(exactDuration),
+      '-r','30','-vsync','cfr',
+      '-c:v','libx264','-profile:v','baseline','-level','3.1','-pix_fmt','yuv420p',
+      '-preset','veryfast','-crf','23',
+      '-c:a','aac','-ar','44100','-b:a','160k',
+      '-movflags','+faststart','out.mp4'
+    );
     const data = ffmpeg.FS('readFile','out.mp4');
     return new Blob([data.buffer], {type:'video/mp4'});
+  }
+  async function exportViaMediaRecorder(dur, fps, onProgress){
+    previewT = 0; renderAt(0);
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const videoStream = cv.captureStream(fps);
+    let mime = 'video/webm;codecs=vp9';
+    if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
+    if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+
+    let recStream = videoStream;
+    let audioCtx = null, audioSrc = null;
+    if(audioFile){
+      try{
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        const arrBuf = await audioFile.arrayBuffer();
+        const audioBuf = await audioCtx.decodeAudioData(arrBuf);
+        const dest = audioCtx.createMediaStreamDestination();
+        audioSrc = audioCtx.createBufferSource();
+        audioSrc.buffer = audioBuf;
+        audioSrc.connect(dest);
+        recStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+        audioSrc.start(0);
+      } catch(err){ console.error('audio mix failed, exporting silent', err); }
+    }
+
+    const recorder = new MediaRecorder(recStream, {mimeType:mime, videoBitsPerSecond: 8_000_000});
+    const chunks = [];
+    recorder.ondataavailable = e=>{ if(e.data.size) chunks.push(e.data); };
+    const finished = new Promise(res=>{ recorder.onstop = res; });
+    recorder.start(1000);
+
+    const track = videoStream.getVideoTracks()[0];
+    const exportStart = performance.now();
+    await new Promise(resolveLoop=>{
+      function step(){
+        const elapsed = (performance.now() - exportStart) / 1000;
+        const t = Math.min(dur - 0.001, elapsed);
+        previewT = t; renderAt(t);
+        if(track.requestFrame) track.requestFrame();
+        onProgress(Math.min(60, Math.round((t/dur)*60)));
+        if(elapsed >= dur){ resolveLoop(); return; }
+        requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+    await new Promise(r=>setTimeout(r, 600));
+    recorder.stop();
+    if(audioSrc){ try{ audioSrc.stop(); }catch(e){} }
+    await finished;
+    if(audioCtx){ try{ audioCtx.close(); }catch(e){} }
+
+    const rawBlob = new Blob(chunks, {type:'video/webm'});
+    return await webmToMp4(rawBlob, dur, pct=>onProgress(60 + Math.round(pct*0.4)));
   }
 
   // ---------- export ----------
@@ -1391,90 +1905,32 @@
 
     const dur = totalDuration();
     const fps = 30;
-    const videoStream = cv.captureStream(fps);
+    const setPct = pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; };
 
-    // native mp4 recording where supported (Safari); otherwise webm then convert
-    let mime = 'video/mp4;codecs=avc1';
-    let nativeMp4 = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(mime);
-    if(!nativeMp4){ mime = 'video/mp4'; nativeMp4 = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(mime); }
-    if(!nativeMp4){
-      mime = 'video/webm;codecs=vp9';
-      if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
-      if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
-    }
-
-    // mix in the optional mp3 track
-    let recStream = videoStream;
-    let audioCtx = null, audioSrc = null;
-    if(audioFile){
-      try{
-        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-        const arrBuf = await audioFile.arrayBuffer();
-        const audioBuf = await audioCtx.decodeAudioData(arrBuf);
-        const dest = audioCtx.createMediaStreamDestination();
-        audioSrc = audioCtx.createBufferSource();
-        audioSrc.buffer = audioBuf;
-        audioSrc.connect(dest);
-        recStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
-        audioSrc.start(0);
-      } catch(err){
-        console.error('audio mix failed, exporting silent', err);
-      }
-    }
-
-    const recorder = new MediaRecorder(recStream, {mimeType:mime, videoBitsPerSecond: 8_000_000});
-    const chunks = [];
-    recorder.ondataavailable = e=>{ if(e.data.size) chunks.push(e.data); };
-    const finished = new Promise(res=>{ recorder.onstop = res; });
-    recorder.start();
-
-    const track = videoStream.getVideoTracks()[0];
-    const exportStart = performance.now();
-    let lastPct = -1;
-    while(true){
-      const elapsed = (performance.now() - exportStart) / 1000;
-      const t = Math.min(dur - 0.001, elapsed);
-      previewT = t;
-      renderAt(t);
-      if(track.requestFrame) track.requestFrame();
-      const pct = Math.min(100, Math.round((t/dur)*100));
-      if(pct !== lastPct){ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; lastPct = pct; }
-      if(elapsed >= dur) break;
-      await new Promise(r=>setTimeout(r, 1000/fps));
-    }
-    recorder.stop();
-    if(audioSrc){ try{ audioSrc.stop(); }catch(e){} }
-    await finished;
-    if(audioCtx){ try{ audioCtx.close(); }catch(e){} }
-
-    const rawType = mime.includes('mp4') ? 'video/mp4' : 'video/webm';
-    const rawBlob = new Blob(chunks, {type:rawType});
-
-    let finalBlob = rawBlob, filename = 'hook-showcase.mp4';
-    if(nativeMp4){
-      genLabel.textContent = 'Done';
-      genPct.textContent = '100%';
-    } else {
-      try{
-        genLabel.textContent = 'Converting to MP4…';
-        genFill.style.width = '0%';
-        genPct.textContent = '0%';
-        finalBlob = await webmToMp4(rawBlob, pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; });
+    let finalBlob = null, filename = 'hook-showcase.mp4';
+    try{
+      if(webCodecsSupported()){
+        finalBlob = await encodeWithWebCodecs(dur, fps, setPct);
         genLabel.textContent = 'Done';
-        genPct.textContent = '100%';
-      } catch(err){
-        console.error(err);
-        finalBlob = rawBlob;
-        filename = 'hook-showcase.webm';
-        genLabel.textContent = 'MP4 conversion unavailable — saved as WebM';
-        genPct.textContent = '';
+      } else {
+        finalBlob = await exportViaMediaRecorder(dur, fps, setPct);
+        genLabel.textContent = 'Done';
       }
+      setPct(100);
+    } catch(err){
+      console.error(err);
+      genLabel.textContent = `Export failed (${(err && err.message) || 'unknown error'}) — try again, or open this page over http(s) instead of file://`;
+      genPct.textContent = '';
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate video';
+      drawPreviewFrame(0);
+      return;
     }
 
     const url = URL.createObjectURL(finalBlob);
     dlLink.href = url;
     dlLink.download = filename;
-    dlLink.textContent = filename.endsWith('.mp4') ? 'Download .mp4' : 'Download .webm';
+    dlLink.textContent = 'Download .mp4';
     dlLink.classList.add('on');
     genBtn.disabled = false;
     genBtn.textContent = 'Generate video';
