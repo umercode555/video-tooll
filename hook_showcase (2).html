@@ -36,6 +36,86 @@
   }
   ::selection{background:var(--green-bright);color:var(--ink);}
 
+  /* ---------- quickbar ---------- */
+  .quickbar{
+    display:flex;
+    gap:10px;
+    padding:12px clamp(16px,4vw,40px);
+    border-bottom:1px solid var(--line);
+    background:rgba(31,174,102,0.03);
+  }
+  .qb-btn{
+    font-family:var(--mono);
+    font-weight:700;
+    font-size:11px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    padding:10px 16px;
+    border-radius:4px;
+    border:1px solid var(--line);
+    background:transparent;
+    color:var(--paper);
+    cursor:pointer;
+    transition:background .15s,border-color .15s;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .qb-btn:hover{border-color:var(--green-bright);background:rgba(31,174,102,0.08);}
+  .qb-btn-alt{background:var(--green);border-color:var(--green);color:var(--paper);}
+  .qb-btn-alt:hover{background:var(--green-bright);color:#06120b;}
+  .qb-count{
+    background:rgba(242,240,230,0.15);
+    border-radius:10px;
+    padding:1px 7px;
+    font-size:9.5px;
+  }
+
+  /* ---------- gallery modal ---------- */
+  .modal-overlay{
+    display:none;
+    position:fixed;inset:0;
+    background:rgba(2,4,3,0.82);
+    z-index:100;
+    align-items:flex-start;
+    justify-content:center;
+    padding:clamp(16px,4vw,60px);
+    overflow-y:auto;
+  }
+  .modal-overlay.on{display:flex;}
+  .modal-box{
+    background:#0b0e0c;
+    border:1px solid var(--line);
+    border-radius:8px;
+    width:100%;
+    max-width:640px;
+    padding:clamp(18px,3vw,28px);
+  }
+  .modal-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:16px;
+  }
+  .modal-head h2{
+    font-family:var(--disp);
+    font-size:13px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--paper);
+  }
+  .modal-close{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--paper);
+    width:30px;height:30px;
+    border-radius:50%;
+    cursor:pointer;
+    font-size:14px;
+    line-height:1;
+  }
+  .modal-close:hover{border-color:var(--green-bright);color:var(--green-bright);}
+
   /* ---------- topbar ---------- */
   .topbar{
     display:flex;
@@ -599,6 +679,11 @@
   <div class="specline">1080 × 1920 · 9:16<br>REEL / STORY / SHORT</div>
 </div>
 
+<div class="quickbar">
+  <button type="button" id="newVideoBtn" class="qb-btn">＋ New video</button>
+  <button type="button" id="openGalleryBtn" class="qb-btn qb-btn-alt">▤ Full gallery<span id="qbGalleryCount" class="qb-count" style="display:none;">0</span></button>
+</div>
+
 <div class="main">
 
   <div class="stage">
@@ -637,9 +722,15 @@
       <button type="button" id="tmplRestoreBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:8px;">↺ Restore last saved template</button>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="align-btn" id="tmplSaveBtn" type="button">Save template</button>
+        <button class="align-btn" id="tmplCopyBtn" type="button">Copy template</button>
         <button class="align-btn" id="tmplExportBtn" type="button">Export .json</button>
         <button class="align-btn" id="tmplImportBtn" type="button">Import .json</button>
         <input type="file" id="tmplImportFile" accept="application/json" style="display:none;">
+      </div>
+      <div id="tmplPickerWrap" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+        <div style="font-size:9.5px;color:rgba(242,240,230,0.55);margin-bottom:6px;">Which template?</div>
+        <select id="tmplPickerSelect" style="width:100%;margin-bottom:8px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:8px;font-family:var(--mono);font-size:11px;"></select>
+        <button class="align-btn" id="tmplPickerLoadBtn" type="button" style="width:100%;">Load this template</button>
       </div>
       <div id="tmplStatus" style="font-size:9.5px;color:var(--green-bright);margin-top:8px;min-height:12px;"></div>
     </div>
@@ -713,6 +804,14 @@
     <div class="field">
       <label>Showcase captions (act 3, text + seconds per image)</label>
       <label class="toggle-row"><input type="checkbox" id="showWordToggle"><span>Reveal one word at a time</span></label>
+
+      <div style="margin-top:10px;border:1px solid var(--line);border-radius:4px;padding:10px;">
+        <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:8px;">Paste all 10 at once, separated by commas — they'll drop into the 10 boxes below in order.</div>
+        <textarea id="bulkCapInput" rows="3" placeholder="e.g. white t-shirt, dark jeans, white sneakers, ..." style="width:100%;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:8px;resize:vertical;"></textarea>
+        <button type="button" id="bulkCapApplyBtn" class="align-btn" style="margin-top:8px;">Split into captions below</button>
+        <div id="bulkCapStatus" style="font-size:9.5px;color:var(--green-bright);margin-top:6px;min-height:12px;"></div>
+      </div>
+
       <div id="capList" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
       <div style="margin-top:14px;">
         <label style="margin-bottom:6px;">Caption position</label>
@@ -754,7 +853,7 @@
     <div class="field" id="galleryPanel">
       <label>Video gallery</label>
       <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
-        Every video you generate is kept here automatically.
+        Every video stays here always — grouped by day, newest first. Survives closing the tab or browser.
       </div>
       <div id="videoGallery" style="display:flex;flex-direction:column;gap:8px;"></div>
       <div id="galleryEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No videos generated yet.</div>
@@ -766,6 +865,29 @@
 
   </div>
 
+</div>
+
+<div class="modal-overlay" id="galleryModalOverlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>All videos</h2>
+      <button type="button" class="modal-close" id="galleryModalClose">✕</button>
+    </div>
+    <div id="videoGalleryModal" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div id="galleryModalEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No videos generated yet.</div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="playerOverlay" style="align-items:center;">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-head">
+      <h2 id="playerTitle">Video</h2>
+      <button type="button" class="modal-close" id="playerClose">✕</button>
+    </div>
+    <div style="width:100%;aspect-ratio:9/16;background:#000;border-radius:4px;overflow:hidden;">
+      <video id="playerVideo" controls autoplay playsinline style="width:100%;height:100%;object-fit:contain;background:#000;"></video>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -833,6 +955,9 @@
   const capSizeVal = document.getElementById('capSizeVal');
   const hookWordToggle = document.getElementById('hookWordToggle');
   const showWordToggle = document.getElementById('showWordToggle');
+  const bulkCapInput = document.getElementById('bulkCapInput');
+  const bulkCapApplyBtn = document.getElementById('bulkCapApplyBtn');
+  const bulkCapStatus = document.getElementById('bulkCapStatus');
   const hookCapText = document.getElementById('hookCapText');
   const audioInput = document.getElementById('audioInput');
   const audioDT = document.getElementById('audioDT');
@@ -840,10 +965,25 @@
   const audioRemove = document.getElementById('audioRemove');
   const tmplSaveBtn = document.getElementById('tmplSaveBtn');
   const tmplRestoreBtn = document.getElementById('tmplRestoreBtn');
+  const tmplCopyBtn = document.getElementById('tmplCopyBtn');
+  const tmplPickerWrap = document.getElementById('tmplPickerWrap');
+  const tmplPickerSelect = document.getElementById('tmplPickerSelect');
+  const tmplPickerLoadBtn = document.getElementById('tmplPickerLoadBtn');
   const tmplExportBtn = document.getElementById('tmplExportBtn');
   const tmplImportBtn = document.getElementById('tmplImportBtn');
   const tmplImportFile = document.getElementById('tmplImportFile');
   const tmplStatus = document.getElementById('tmplStatus');
+  const newVideoBtn = document.getElementById('newVideoBtn');
+  const openGalleryBtn = document.getElementById('openGalleryBtn');
+  const qbGalleryCount = document.getElementById('qbGalleryCount');
+  const galleryModalOverlay = document.getElementById('galleryModalOverlay');
+  const galleryModalClose = document.getElementById('galleryModalClose');
+  const videoGalleryModal = document.getElementById('videoGalleryModal');
+  const galleryModalEmpty = document.getElementById('galleryModalEmpty');
+  const playerOverlay = document.getElementById('playerOverlay');
+  const playerClose = document.getElementById('playerClose');
+  const playerVideo = document.getElementById('playerVideo');
+  const playerTitle = document.getElementById('playerTitle');
   const videoGallery = document.getElementById('videoGallery');
   const galleryEmpty = document.getElementById('galleryEmpty');
   const progressLine = document.getElementById('progressLine');
@@ -933,6 +1073,33 @@
   showWordToggle.addEventListener('change', ()=>{
     showWordByWord = showWordToggle.checked;
     drawPreviewFrame(previewT);
+  });
+
+  // ---------- bulk captions: paste "item, item, item..." and split into the 10 boxes ----------
+  bulkCapApplyBtn.addEventListener('click', ()=>{
+    const raw = bulkCapInput.value.trim();
+    if(!raw){ bulkCapStatus.style.color = '#e05a4a'; bulkCapStatus.textContent = 'Paste some text first.'; return; }
+
+    const parts = raw.split(',')
+      .map(s=>s.trim().replace(/\.+$/,'').trim())
+      .filter(s=>s.length>0);
+
+    const count = Math.min(parts.length, N);
+    for(let i=0;i<count;i++) captions[i] = parts[i];
+
+    renderCaptions();
+    drawPreviewFrame(previewT);
+
+    if(parts.length === N){
+      bulkCapStatus.style.color = 'var(--green-bright)';
+      bulkCapStatus.textContent = `Dropped all 10 into the captions below.`;
+    } else if(parts.length < N){
+      bulkCapStatus.style.color = '#e0a94a';
+      bulkCapStatus.textContent = `Only found ${parts.length} — filled captions 1–${parts.length}, the rest left as-is.`;
+    } else {
+      bulkCapStatus.style.color = '#e0a94a';
+      bulkCapStatus.textContent = `Found ${parts.length} — used the first 10, ignored the extra ${parts.length-N}.`;
+    }
   });
 
   audioInput.addEventListener('change', e=>{
@@ -1205,6 +1372,15 @@
       req.onerror = ()=>reject(req.error);
     });
   }
+  async function idbGetAllKeys(storeName){
+    const db = await openDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(storeName,'readonly');
+      const req = tx.objectStore(storeName).getAllKeys();
+      req.onsuccess = ()=>resolve(req.result || []);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
 
   // ---------- template save / load ----------
   // Saves EVERYTHING: the 10 images, all captions, and every style setting
@@ -1317,10 +1493,57 @@
   }
 
   tmplSaveBtn.addEventListener('click', async ()=>{
+    const suggested = await nextVideoName().then(n=>`${n} template`).catch(()=>'My template');
+    const name = prompt('Name this template — e.g. "Video 5 template":', suggested);
+    if(!name) return;
     tmplSaveBtn.disabled = true; tmplSaveBtn.textContent = 'Saving…';
-    const ok = await saveTemplateToStorage();
+    try{
+      const data = await collectTemplate();
+      await idbPut('templates', data, name.trim());
+      await idbPut('templates', data, TEMPLATE_KEY); // also keep as "current" for auto-restore on open
+      showTmplStatus(`Saved as "${name.trim()}".`);
+    } catch(err){
+      console.error('template save failed', err);
+      showTmplStatus('Save failed.', true);
+    }
     tmplSaveBtn.disabled = false; tmplSaveBtn.textContent = 'Save template';
-    showTmplStatus(ok ? 'Saved — images, captions, and every setting.' : 'Save failed.', !ok);
+  });
+
+  tmplCopyBtn.addEventListener('click', async ()=>{
+    try{
+      const keys = (await idbGetAllKeys('templates')).filter(k=>k!==TEMPLATE_KEY);
+      if(!keys.length){
+        tmplPickerWrap.style.display = 'none';
+        showTmplStatus('No named templates saved yet — click "Save template" first.', true);
+        return;
+      }
+      tmplPickerSelect.innerHTML = keys.map(k=>`<option value="${k}">${k}</option>`).join('');
+      tmplPickerWrap.style.display = 'block';
+      showTmplStatus(`Pick which template — ${keys.length} saved.`);
+    } catch(err){
+      console.error(err);
+      showTmplStatus('Could not read saved templates.', true);
+    }
+  });
+
+  tmplPickerLoadBtn.addEventListener('click', async ()=>{
+    const name = tmplPickerSelect.value;
+    if(!name) return;
+    tmplPickerLoadBtn.disabled = true; tmplPickerLoadBtn.textContent = 'Loading…';
+    try{
+      const t = await idbGet('templates', name);
+      if(!t){ showTmplStatus('That template was not found.', true); }
+      else{
+        await applyTemplate(t);
+        await saveTemplateToStorage();
+        showTmplStatus(`Loaded "${name}" — images, captions, everything.`);
+        tmplPickerWrap.style.display = 'none';
+      }
+    } catch(err){
+      console.error(err);
+      showTmplStatus('Load failed.', true);
+    }
+    tmplPickerLoadBtn.disabled = false; tmplPickerLoadBtn.textContent = 'Load this template';
   });
 
   tmplRestoreBtn.addEventListener('click', async ()=>{
@@ -1404,8 +1627,10 @@
 
   // ---------- video gallery ----------
   // Every video you generate is kept here (IndexedDB) automatically —
-  // Video 1, Video 2, Video 3... with play / download / delete.
+  // Video 1, Video 2, Video 3... grouped by day, with play / download / delete.
+  // Rendered into two places: the sidebar panel, and the "Full gallery" modal.
   let galleryObjectUrls = [];
+  let modalGalleryObjectUrls = [];
   async function nextVideoName(){
     const all = await idbGetAll('videos');
     let max = 0;
@@ -1418,39 +1643,134 @@
   async function saveVideoToGallery(blob){
     const name = await nextVideoName();
     await idbPut('videos', { name, blob, createdAt: Date.now() });
-    await renderGallery();
+    await refreshAllGalleries();
   }
-  async function renderGallery(){
-    galleryObjectUrls.forEach(u=>URL.revokeObjectURL(u));
-    galleryObjectUrls = [];
-    const all = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
-    videoGallery.innerHTML = '';
-    galleryEmpty.style.display = all.length ? 'none' : 'block';
+  function dayKey(ts){
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  }
+  function dayHeaderLabel(ts, count){
+    const d = new Date(ts);
+    const today = new Date();
+    const yest = new Date(); yest.setDate(today.getDate()-1);
+    let when;
+    if(d.toDateString() === today.toDateString()) when = 'today';
+    else if(d.toDateString() === yest.toDateString()) when = 'yesterday';
+    else when = `on ${d.getDate()} ${d.toLocaleDateString(undefined,{month:'long'})}`;
+    return `You made ${count} video${count===1?'':'s'} ${when}`;
+  }
+  function renderGalleryRows(container, all, urlsRef){
+    urlsRef.forEach(u=>URL.revokeObjectURL(u));
+    urlsRef.length = 0;
+    container.innerHTML = '';
+
+    const groups = [];
+    let curKey = null, curGroup = null;
     for(const v of all){
-      const url = URL.createObjectURL(v.blob);
-      galleryObjectUrls.push(url);
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;';
-      const dt = new Date(v.createdAt);
-      row.innerHTML = `
-        <video src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;" preload="metadata"></video>
-        <div style="flex:1;min-width:0;">
-          <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}</div>
-          <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
-        </div>
-        <a href="${url}" download="${v.name.replace(/\s+/g,'-').toLowerCase()}.mp4" class="align-btn" style="text-decoration:none;padding:6px 8px;">Download</a>
-        <button type="button" class="align-btn" data-del="${v.id}" style="padding:6px 8px;">Delete</button>
-      `;
-      videoGallery.appendChild(row);
+      const k = dayKey(v.createdAt);
+      if(k !== curKey){ curGroup = { items: [] }; groups.push(curGroup); curKey = k; }
+      curGroup.items.push(v);
     }
-    videoGallery.querySelectorAll('[data-del]').forEach(btn=>{
+
+    for(const g of groups){
+      const header = document.createElement('div');
+      header.textContent = dayHeaderLabel(g.items[0].createdAt, g.items.length);
+      header.style.cssText = 'font-family:var(--disp);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--green-bright);margin-top:10px;';
+      container.appendChild(header);
+
+      for(const v of g.items){
+        const url = URL.createObjectURL(v.blob);
+        urlsRef.push(url);
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;';
+        const dt = new Date(v.createdAt);
+        row.innerHTML = `
+          <div data-play="${v.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+            <video src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="metadata"></video>
+            <div style="flex:1;min-width:0;">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}</div>
+              <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · tap to play</div>
+            </div>
+          </div>
+          <a href="${url}" download="${v.name.replace(/\s+/g,'-').toLowerCase()}.mp4" class="align-btn" style="text-decoration:none;padding:6px 8px;">Download</a>
+          <button type="button" class="align-btn" data-del="${v.id}" style="padding:6px 8px;">Delete</button>
+        `;
+        container.appendChild(row);
+      }
+    }
+
+    container.querySelectorAll('[data-play]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = +el.dataset.play;
+        const v = await idbGet('videos', id);
+        if(!v) return;
+        if(playerVideo.src) URL.revokeObjectURL(playerVideo.src);
+        playerVideo.src = URL.createObjectURL(v.blob);
+        playerTitle.textContent = v.name;
+        playerOverlay.classList.add('on');
+      });
+    });
+
+    container.querySelectorAll('[data-del]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         await idbDelete('videos', +btn.dataset.del);
-        await renderGallery();
+        await refreshAllGalleries();
       });
     });
   }
-  renderGallery();
+  async function refreshAllGalleries(){
+    const all = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
+
+    galleryEmpty.style.display = all.length ? 'none' : 'block';
+    renderGalleryRows(videoGallery, all, galleryObjectUrls);
+
+    galleryModalEmpty.style.display = all.length ? 'none' : 'block';
+    renderGalleryRows(videoGalleryModal, all, modalGalleryObjectUrls);
+
+    if(all.length){ qbGalleryCount.textContent = all.length; qbGalleryCount.style.display = 'inline-block'; }
+    else { qbGalleryCount.style.display = 'none'; }
+  }
+  const renderGallery = refreshAllGalleries; // back-compat alias
+  refreshAllGalleries();
+
+  openGalleryBtn.addEventListener('click', ()=>{ galleryModalOverlay.classList.add('on'); });
+  galleryModalClose.addEventListener('click', ()=>{ galleryModalOverlay.classList.remove('on'); });
+  galleryModalOverlay.addEventListener('click', e=>{ if(e.target === galleryModalOverlay) galleryModalOverlay.classList.remove('on'); });
+
+  function closePlayer(){
+    playerVideo.pause();
+    if(playerVideo.src){ URL.revokeObjectURL(playerVideo.src); playerVideo.removeAttribute('src'); playerVideo.load(); }
+    playerOverlay.classList.remove('on');
+  }
+  playerClose.addEventListener('click', closePlayer);
+  playerOverlay.addEventListener('click', e=>{ if(e.target === playerOverlay) closePlayer(); });
+
+  // ---------- new video: clear the working area for a fresh set of images ----------
+  // Keeps timing/style/template settings as-is (so the current template still
+  // applies) but wipes the 10 image slots, captions, audio, and any rendered
+  // preview/download so you can start the next video from a clean slate.
+  newVideoBtn.addEventListener('click', ()=>{
+    if(images.some(Boolean) && !confirm('Start a new video? This clears the 10 loaded images, captions, and audio (your saved templates and gallery are unaffected).')) return;
+
+    stopPreview();
+    images.forEach(slot=>{ if(slot) URL.revokeObjectURL(slot.url); });
+    images = new Array(N).fill(null);
+    captions = new Array(N).fill('');
+
+    if(audioFile){ audioRemove.click(); }
+
+    fileInput.value = '';
+    renderTray();
+    renderCaptions();
+    updateGenState();
+    drawPreviewFrame(0);
+
+    genStatus.style.display = 'none';
+    genFill.style.width = '0%';
+    dlLink.classList.remove('on');
+
+    showTmplStatus('Ready for a new video — same template, empty slots.');
+  });
 
   // ---------- drawing ----------
   function coverDraw(img, x, y, w, h){
@@ -1935,6 +2255,13 @@
     genBtn.disabled = false;
     genBtn.textContent = 'Generate video';
     drawPreviewFrame(0);
+
+    try{
+      await saveVideoToGallery(finalBlob);
+    } catch(err){
+      console.error('saving to gallery failed', err);
+      showTmplStatus('Video downloaded but could not save to gallery.', true);
+    }
   });
 
   refreshAll();
