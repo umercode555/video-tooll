@@ -735,6 +735,17 @@
     </div>
 
     <div>
+      <label for="manifestInput" class="drop" id="manifestZone" style="border-color:var(--green-bright);background:rgba(31,174,102,0.06);margin-bottom:8px;">
+        <input type="file" id="manifestInput" multiple>
+        <div class="dt" style="color:var(--green-bright);">⇪ Upload image + caption</div>
+        <div class="ds">drag the whole product-pack folder here<br>(from your Pinterest Product Pack extension)<br>— or select manifest.json + images below</div>
+      </label>
+      <button type="button" id="manifestFolderBtn" class="align-btn" style="width:100%;margin-bottom:10px;">Or browse for the folder</button>
+      <input type="file" id="manifestFolderInput" webkitdirectory directory multiple style="display:none">
+      <input type="file" id="manifestImagesInput" accept="image/*" multiple style="display:none">
+      <div id="manifestStatus" style="font-size:9.5px;margin-bottom:10px;min-height:12px;"></div>
+      <button type="button" id="manifestImagesBtn" style="display:none;width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:10px;">Select the matching images</button>
+
       <label for="fileInput" class="drop" id="dropZone">
         <input type="file" id="fileInput" accept="image/*" multiple>
         <div class="dt">Drop or select images</div>
@@ -1360,6 +1371,205 @@
   }
 
   fileInput.addEventListener('change', e=>{ handleFiles(e.target.files); fileInput.value=''; });
+
+  // ---------- manifest.json bulk upload (Pinterest Product Pack Grabber output) ----------
+  const manifestZone = document.getElementById('manifestZone');
+  const manifestInput = document.getElementById('manifestInput');
+  const manifestStatus = document.getElementById('manifestStatus');
+  const manifestImagesInput = document.getElementById('manifestImagesInput');
+  const manifestImagesBtn = document.getElementById('manifestImagesBtn');
+  const manifestFolderBtn = document.getElementById('manifestFolderBtn');
+  const manifestFolderInput = document.getElementById('manifestFolderInput');
+  let pendingManifestData = null; // set when manifest.json arrived without its images
+
+  manifestInput.addEventListener('change', e=>{ receiveManifestDrop(e.target.files); manifestInput.value=''; });
+  manifestFolderBtn.addEventListener('click', ()=> manifestFolderInput.click());
+  manifestFolderInput.addEventListener('change', e=>{ receiveManifestDrop(e.target.files); manifestFolderInput.value=''; });
+
+  ['dragenter','dragover'].forEach(ev=>manifestZone.addEventListener(ev,e=>{e.preventDefault();manifestZone.classList.add('drag');}));
+  ['dragleave'].forEach(ev=>manifestZone.addEventListener(ev,e=>{e.preventDefault();manifestZone.classList.remove('drag');}));
+  manifestZone.addEventListener('drop', async e=>{
+    e.preventDefault();
+    manifestZone.classList.remove('drag');
+    if(!e.dataTransfer) return;
+
+    // Dragging a folder icon straight from Finder: walk it with the
+    // filesystem entry API so manifest.json + every image inside are
+    // pulled out in one drop, no separate steps needed.
+    if(e.dataTransfer.items && e.dataTransfer.items.length && e.dataTransfer.items[0].webkitGetAsEntry){
+      const files = await collectFilesFromDrop(e.dataTransfer.items);
+      if(files.length) receiveManifestDrop(files);
+      return;
+    }
+    if(e.dataTransfer.files && e.dataTransfer.files.length) receiveManifestDrop(e.dataTransfer.files);
+  });
+
+  function collectFilesFromDrop(dataTransferItems){
+    const entries = [];
+    for(const item of dataTransferItems){
+      const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+      if(entry) entries.push(entry);
+    }
+
+    function fileFromEntry(entry){
+      return new Promise((resolve,reject)=> entry.file(resolve, reject));
+    }
+    function readAllEntries(reader){
+      return new Promise((resolve,reject)=>{
+        const all = [];
+        (function next(){
+          reader.readEntries(batch=>{
+            if(!batch.length){ resolve(all); return; }
+            all.push(...batch);
+            next();
+          }, reject);
+        })();
+      });
+    }
+    async function walk(entry){
+      if(entry.isFile){
+        const file = await fileFromEntry(entry).catch(()=>null);
+        return file ? [file] : [];
+      }
+      if(entry.isDirectory){
+        const children = await readAllEntries(entry.createReader()).catch(()=>[]);
+        const nested = await Promise.all(children.map(walk));
+        return nested.flat();
+      }
+      return [];
+    }
+
+    return Promise.all(entries.map(walk)).then(lists=>lists.flat());
+  }
+
+  manifestImagesBtn.addEventListener('click', ()=> manifestImagesInput.click());
+  manifestImagesInput.addEventListener('change', e=>{
+    if(pendingManifestData && e.target.files.length) applyManifest(pendingManifestData, Array.from(e.target.files));
+    manifestImagesInput.value = '';
+  });
+
+  function setManifestStatus(msg, ok){
+    manifestStatus.style.color = ok ? 'var(--green-bright)' : '#e0574a';
+    manifestStatus.textContent = msg;
+  }
+
+  function stripDupeSuffix(name){
+    // Chrome appends " (1)", " (2)" etc to avoid overwriting an existing download.
+    return name.replace(/\s\(\d+\)(\.\w+)$/i, '$1').toLowerCase();
+  }
+
+  function isImageFile(f){
+    return f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(f.name);
+  }
+
+  // Entry point for both the drop zone and the file picker. Handles three cases:
+  //  1. manifest.json + images dropped together  -> match immediately
+  //  2. manifest.json dropped alone               -> parse it, then prompt for images
+  //  3. images dropped while a manifest is pending -> use the pending manifest
+  function receiveManifestDrop(fileList){
+    const files = Array.from(fileList);
+    const manifestFile = files.find(f => /manifest(\s\(\d+\))?\.json$/i.test(f.name));
+    const imageFiles = files.filter(f => f !== manifestFile && isImageFile(f));
+
+    if(manifestFile){
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        let data;
+        try{ data = JSON.parse(reader.result); }
+        catch(err){ setManifestStatus('manifest.json could not be parsed — file may be corrupted.', false); return; }
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        if(!items.length){ setManifestStatus('manifest.json has no items in it.', false); return; }
+
+        if(imageFiles.length){
+          pendingManifestData = null;
+          manifestImagesBtn.style.display = 'none';
+          applyManifest(items, imageFiles);
+        } else {
+          pendingManifestData = items;
+          manifestImagesBtn.style.display = 'block';
+          setManifestStatus('manifest.json loaded (' + items.length + ' item' + (items.length===1?'':'s') + ') — now click below and select the ' + items.length + ' matching image' + (items.length===1?'':'s') + '.', true);
+        }
+      };
+      reader.onerror = ()=> setManifestStatus('Could not read manifest.json from disk.', false);
+      reader.readAsText(manifestFile);
+      return;
+    }
+
+    // No manifest.json in this drop — only useful if one's already pending.
+    if(imageFiles.length && pendingManifestData){
+      applyManifest(pendingManifestData, imageFiles);
+      return;
+    }
+
+    setManifestStatus('No manifest.json in that selection — drop it (alone, or with images).', false);
+  }
+
+  function applyManifest(items, imageFiles){
+    // A manifest upload replaces the whole batch, not just the slots it
+    // touches — otherwise old images/captions from a previous session
+    // linger in the untouched slots.
+    for(let i=0;i<N;i++){
+      if(images[i] && images[i].url) URL.revokeObjectURL(images[i].url);
+      images[i] = null;
+      captions[i] = '';
+    }
+    renderTray(); renderCaptions(); updateGenState(); refreshAll();
+
+    const byExactName = {};
+    const byStrippedName = {};
+    imageFiles.forEach(f=>{
+      byExactName[f.name.toLowerCase()] = f;
+      byStrippedName[stripDupeSuffix(f.name)] = f;
+    });
+    const usedFiles = new Set();
+    const sortedPool = imageFiles.slice().sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true}));
+
+    function resolveFile(wantedName){
+      const key = String(wantedName || '').toLowerCase();
+      let f = byExactName[key] && !usedFiles.has(byExactName[key]) ? byExactName[key] : null;
+      if(!f){
+        const stripped = stripDupeSuffix(wantedName || '');
+        f = byStrippedName[stripped] && !usedFiles.has(byStrippedName[stripped]) ? byStrippedName[stripped] : null;
+      }
+      if(!f){
+        // positional fallback: next unused file in sorted order
+        f = sortedPool.find(x => !usedFiles.has(x)) || null;
+      }
+      if(f) usedFiles.add(f);
+      return f;
+    }
+
+    let slot = images.findIndex(x=>!x);
+    let loaded = 0, missing = 0, pending = items.length;
+
+    items.forEach(item=>{
+      if(slot === -1 || slot >= N){ pending--; if(pending===0) finish(); return; }
+      const f = resolveFile(item.file);
+      if(!f){ missing++; pending--; if(pending===0) finish(); return; }
+
+      const url = URL.createObjectURL(f);
+      const img = new Image();
+      const s = slot;
+      img.onload = ()=>{
+        images[s] = {file:f, url, img};
+        captions[s] = item.keyword || captions[s] || '';
+        loaded++;
+        renderTray(); renderCaptions(); updateGenState(); refreshAll();
+        pending--; if(pending===0) finish();
+      };
+      img.onerror = ()=>{ missing++; pending--; if(pending===0) finish(); };
+      img.src = url;
+      slot++;
+      while(slot < N && images[slot]) slot++;
+    });
+
+    function finish(){
+      pendingManifestData = null;
+      manifestImagesBtn.style.display = 'none';
+      setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
+    }
+  }
   ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
   ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
   dropZone.addEventListener('drop', e=>{ if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
