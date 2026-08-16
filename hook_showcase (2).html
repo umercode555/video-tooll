@@ -682,6 +682,7 @@
 <div class="quickbar">
   <button type="button" id="newVideoBtn" class="qb-btn">＋ New video</button>
   <button type="button" id="openGalleryBtn" class="qb-btn qb-btn-alt">▤ Full gallery<span id="qbGalleryCount" class="qb-count" style="display:none;">0</span></button>
+  <button type="button" id="openVoiceLibBtn" class="qb-btn qb-btn-alt">🎙 Voice library<span id="qbVoiceCount" class="qb-count" style="display:none;">0</span></button>
 </div>
 
 <div class="main">
@@ -773,6 +774,67 @@
         <span>Card position</span>
         <select id="cardPosSelect"></select>
       </div>
+      <div class="timing-row" style="align-items:center;">
+        <span>Card color</span>
+        <div style="display:flex;align-items:center;gap:8px;grid-column:2/4;">
+          <div id="cardColorSwatch" title="Click to pick a custom color" style="width:26px;height:26px;border-radius:5px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;"></div>
+          <label class="toggle-row" style="margin:0;flex:1;"><input type="checkbox" id="cardColorAutoToggle" checked><span>Auto (from images)</span></label>
+        </div>
+      </div>
+      <div id="cardColorPicker" style="display:none;margin:2px 0 10px;padding:12px;border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,0.015);">
+
+        <div style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(242,240,230,0.4);margin-bottom:8px;">Palette</div>
+        <div id="presetSwatches" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;"></div>
+
+        <button type="button" id="customColorToggleBtn" class="align-btn" style="width:100%;margin-bottom:0;display:flex;justify-content:space-between;align-items:center;">
+          <span>Custom color</span><span id="customColorChevron">▾</span>
+        </button>
+        <div id="customColorBody" style="display:none;margin-top:12px;">
+          <canvas id="svCanvas" width="220" height="120" style="width:100%;height:120px;border-radius:4px;cursor:crosshair;display:block;"></canvas>
+          <div id="svMarker" style="position:relative;width:0;height:0;"><div style="position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.6);pointer-events:none;transform:translate(-5px,-5px);top:0;left:0;" id="svMarkerDot"></div></div>
+          <canvas id="hueCanvas" width="220" height="14" style="width:100%;height:14px;border-radius:4px;cursor:pointer;display:block;margin-top:12px;"></canvas>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+            <span style="font-size:9px;color:rgba(242,240,230,0.45);">HEX</span>
+            <input type="text" id="hexInput" placeholder="#0e3d24" style="flex:1;background:#0d0f0c;border:1px solid var(--line);border-radius:4px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;">
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:rgba(242,240,230,0.45);margin-bottom:4px;">
+            <span>Alpha / tint strength</span><span id="cardAlphaVal">90%</span>
+          </div>
+          <input type="range" id="cardAlphaRange" min="0.3" max="1" step="0.01" value="0.9" style="width:100%;">
+        </div>
+      </div>
+
+      <div class="timing-row" style="align-items:center;">
+        <span>Card background</span>
+        <div style="display:flex;gap:6px;grid-column:2/4;">
+          <button type="button" class="align-btn" data-bgmode="color" id="cardBgModeColorBtn" style="flex:1;">Solid color</button>
+          <button type="button" class="align-btn" data-bgmode="image" id="cardBgModeImageBtn" style="flex:1;">Use an image</button>
+        </div>
+      </div>
+      <div id="cardBgThumbsWrap" style="display:none;margin-bottom:10px;">
+        <div style="font-size:9.5px;color:rgba(242,240,230,0.55);margin-bottom:6px;">Pick which loaded image sits behind the card — the color above becomes a tint over it, so the word stays readable.</div>
+        <div id="cardBgThumbs" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+      </div>
+
+      <div class="timing-row" style="align-items:center;">
+        <span>Word color</span>
+        <div style="display:flex;align-items:center;gap:8px;grid-column:2/4;">
+          <button type="button" class="align-btn cw-preset" data-color="#ffffff" style="padding:6px 10px;">White</button>
+          <button type="button" class="align-btn cw-preset" data-color="#050806" style="padding:6px 10px;">Black</button>
+          <div id="cardTextColorSwatch" title="Custom word color" style="width:26px;height:26px;border-radius:5px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;background:#ffffff;"></div>
+        </div>
+      </div>
+      <div id="cardTextColorPicker" style="display:none;margin:2px 0 10px;padding:12px;border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,0.015);">
+        <canvas id="textSvCanvas" width="220" height="100" style="width:100%;height:100px;border-radius:4px;cursor:crosshair;display:block;"></canvas>
+        <div id="textSvMarker" style="position:relative;width:0;height:0;"><div style="position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.6);pointer-events:none;transform:translate(-5px,-5px);top:0;left:0;" id="textSvMarkerDot"></div></div>
+        <canvas id="textHueCanvas" width="220" height="14" style="width:100%;height:14px;border-radius:4px;cursor:pointer;display:block;margin-top:10px;"></canvas>
+      </div>
+      <div class="hint" id="cardWordColorHint" style="margin-top:-4px;margin-bottom:10px;">Applies to every word by default — give a single word its own color below.</div>
+
+      <div id="cardWordPosList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+
       <div class="timing-row">
         <span>Image length</span>
         <input type="range" id="showDurRange" min="0.2" max="5" step="0.1" value="1">
@@ -895,6 +957,30 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="voiceLibModalOverlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Voice-over library</h2>
+      <button type="button" class="modal-close" id="voiceLibModalClose">✕</button>
+    </div>
+    <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
+      Upload every MP3 voice-over at once. Run transcription, then each one gets auto-matched to the gallery video whose captions/products it talks about — in order, not just keyword overlap. Review and reassign anything uncertain before exporting.
+    </div>
+    <label for="voMultiInput" class="drop" id="voDropZone" style="padding:16px;margin-bottom:10px;">
+      <input type="file" id="voMultiInput" accept="audio/mp3,audio/mpeg,audio/*" multiple>
+      <div class="dt">Drop or select MP3s</div>
+      <div class="ds">any number at once · saved immediately</div>
+    </label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <button type="button" id="voTranscribeAllBtn" class="align-btn" style="flex:1;">▶ Run transcription (2.5 min apart)</button>
+      <button type="button" id="voRematchBtn" class="align-btn">Re-match all</button>
+    </div>
+    <div id="voStatus" style="font-size:9.5px;color:var(--green-bright);margin-bottom:10px;min-height:12px;"></div>
+    <div id="voList" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div id="voEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No voice-overs uploaded yet.</div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="playerOverlay" style="align-items:center;">
   <div class="modal-box" style="max-width:400px;">
     <div class="modal-head">
@@ -933,6 +1019,18 @@
   let hookWordByWord = false;
   let showWordByWord = false;
   let audioFile = null;
+  let cardColorAuto = true;          // when true, card color is derived from loaded images
+  let cardColorManual = '#0e3d24';   // last manually picked color (hex)
+  let cardColorAlpha = 0.9;          // alpha applied to whichever color is active
+  let cardColorComputed = '#0e3d24'; // last auto-computed color (hex, no alpha)
+  let hueVal = 150, satVal = 0.7, valVal = 0.24; // current HSV of the card-color picker
+  let cardBgMode = 'color';          // 'color' | 'image'
+  let cardBgImageIdx = null;         // which loaded image (0..N-1) sits behind the card
+  let cardTextColor = '#ffffff';     // default color for every card word
+  let textHueVal = 0, textSatVal = 0, textValVal = 1; // HSV of the word-color picker
+  let cardWordColors = {};           // {wordIndex: hex} per-word override
+  let cardWordPosEnabled = {};       // {wordIndex: true} — word can be dragged independently
+  let cardWordPos = {};              // {wordIndex: {xNorm,yNorm}} — that word's own position
 
   let images = new Array(N).fill(null); // {file, url, img}
   let captions = new Array(N).fill('');
@@ -945,6 +1043,33 @@
   const countNum = document.getElementById('countNum');
   const capList = document.getElementById('capList');
   const cardTextInput = document.getElementById('cardText');
+  const cardColorSwatch = document.getElementById('cardColorSwatch');
+  const cardColorAutoToggle = document.getElementById('cardColorAutoToggle');
+  const cardColorPicker = document.getElementById('cardColorPicker');
+  const presetSwatches = document.getElementById('presetSwatches');
+  const customColorToggleBtn = document.getElementById('customColorToggleBtn');
+  const customColorChevron = document.getElementById('customColorChevron');
+  const customColorBody = document.getElementById('customColorBody');
+  const svCanvas = document.getElementById('svCanvas');
+  const svCtx = svCanvas.getContext('2d');
+  const svMarkerDot = document.getElementById('svMarkerDot');
+  const hueCanvas = document.getElementById('hueCanvas');
+  const hueCtx = hueCanvas.getContext('2d');
+  const hexInput = document.getElementById('hexInput');
+  const cardAlphaRange = document.getElementById('cardAlphaRange');
+  const cardAlphaVal = document.getElementById('cardAlphaVal');
+  const cardBgModeColorBtn = document.getElementById('cardBgModeColorBtn');
+  const cardBgModeImageBtn = document.getElementById('cardBgModeImageBtn');
+  const cardBgThumbsWrap = document.getElementById('cardBgThumbsWrap');
+  const cardBgThumbs = document.getElementById('cardBgThumbs');
+  const cardTextColorSwatch = document.getElementById('cardTextColorSwatch');
+  const cardTextColorPicker = document.getElementById('cardTextColorPicker');
+  const textSvCanvas = document.getElementById('textSvCanvas');
+  const textSvCtx = textSvCanvas.getContext('2d');
+  const textSvMarkerDot = document.getElementById('textSvMarkerDot');
+  const textHueCanvas = document.getElementById('textHueCanvas');
+  const textHueCtx = textHueCanvas.getContext('2d');
+  const cardWordPosList = document.getElementById('cardWordPosList');
   const genBtn = document.getElementById('genBtn');
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
@@ -1076,6 +1201,316 @@
     renderCaptions();
     refreshAll();
   });
+
+  // ---------- dynamic card color, background image, and word styling ----------
+  function hsvToHex(h, s, v){
+    const c = v*s, x = c*(1-Math.abs((h/60)%2-1)), m = v-c;
+    let r,g,b;
+    if(h<60){r=c;g=x;b=0;} else if(h<120){r=x;g=c;b=0;} else if(h<180){r=0;g=c;b=x;}
+    else if(h<240){r=0;g=x;b=c;} else if(h<300){r=x;g=0;b=c;} else {r=c;g=0;b=x;}
+    const toHex = n => Math.round((n+m)*255).toString(16).padStart(2,'0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  }
+  function hexToRgb(hex){
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex||'');
+    return m ? { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) } : { r:14,g:61,b:36 };
+  }
+  function rgbToHsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+    let h=0;
+    if(d!==0){
+      if(max===r) h = 60*(((g-b)/d)%6);
+      else if(max===g) h = 60*((b-r)/d+2);
+      else h = 60*((r-g)/d+4);
+    }
+    if(h<0) h+=360;
+    return { h, s: max===0?0:d/max, v: max };
+  }
+  function hexToRgba(hex, alpha){
+    const {r,g,b} = hexToRgb(hex);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  function activeCardColorHex(){
+    return cardColorAuto ? cardColorComputed : cardColorManual;
+  }
+  function activeCardFill(){
+    return hexToRgba(activeCardColorHex(), cardColorAlpha);
+  }
+
+  // Reusable saturation/value square + hue bar picker — used for both the
+  // card background color and the card word color, so there's exactly one
+  // drag-a-marker implementation instead of two near-identical ones.
+  function makeColorPicker(svCanvasEl, markerDotEl, hueCanvasEl, onPick){
+    const sCtx = svCanvasEl.getContext('2d');
+    const hCtx = hueCanvasEl.getContext('2d');
+    let h=0, s=0, v=1;
+    function drawSv(){
+      const w = svCanvasEl.width, ht = svCanvasEl.height;
+      const satGrad = sCtx.createLinearGradient(0,0,w,0);
+      satGrad.addColorStop(0,'#fff'); satGrad.addColorStop(1, hsvToHex(h,1,1));
+      sCtx.fillStyle = satGrad; sCtx.fillRect(0,0,w,ht);
+      const valGrad = sCtx.createLinearGradient(0,0,0,ht);
+      valGrad.addColorStop(0,'rgba(0,0,0,0)'); valGrad.addColorStop(1,'#000');
+      sCtx.fillStyle = valGrad; sCtx.fillRect(0,0,w,ht);
+    }
+    function drawHue(){
+      const w = hueCanvasEl.width, ht = hueCanvasEl.height;
+      const grad = hCtx.createLinearGradient(0,0,w,0);
+      for(let i=0;i<=6;i++) grad.addColorStop(i/6, hsvToHex(i*60,1,1));
+      hCtx.fillStyle = grad; hCtx.fillRect(0,0,w,ht);
+    }
+    function positionMarker(){
+      markerDotEl.style.left = (s*100)+'%';
+      markerDotEl.style.top = ((1-v)*100)+'%';
+      markerDotEl.parentElement.style.marginTop = `-${svCanvasEl.height}px`;
+      markerDotEl.parentElement.style.pointerEvents = 'none';
+    }
+    function commit(){ onPick(hsvToHex(h,s,v)); }
+    function svHandler(e){
+      const rect = svCanvasEl.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      s = Math.min(Math.max((clientX-rect.left)/rect.width,0),1);
+      v = 1-Math.min(Math.max((clientY-rect.top)/rect.height,0),1);
+      positionMarker(); commit();
+    }
+    let svDragging=false;
+    svCanvasEl.addEventListener('mousedown', e=>{ svDragging=true; svHandler(e); });
+    window.addEventListener('mousemove', e=>{ if(svDragging) svHandler(e); });
+    window.addEventListener('mouseup', ()=>{ svDragging=false; });
+    svCanvasEl.addEventListener('touchstart', e=>{ svDragging=true; svHandler(e); });
+    svCanvasEl.addEventListener('touchmove', e=>{ if(svDragging){ e.preventDefault(); svHandler(e); } }, {passive:false});
+    svCanvasEl.addEventListener('touchend', ()=>{ svDragging=false; });
+
+    function hueHandler(e){
+      const rect = hueCanvasEl.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      h = Math.min(Math.max((clientX-rect.left)/rect.width,0),1)*360;
+      drawSv(); commit();
+    }
+    let hueDragging=false;
+    hueCanvasEl.addEventListener('mousedown', e=>{ hueDragging=true; hueHandler(e); });
+    window.addEventListener('mousemove', e=>{ if(hueDragging) hueHandler(e); });
+    window.addEventListener('mouseup', ()=>{ hueDragging=false; });
+    hueCanvasEl.addEventListener('touchstart', e=>{ hueDragging=true; hueHandler(e); });
+    hueCanvasEl.addEventListener('touchmove', e=>{ if(hueDragging){ e.preventDefault(); hueHandler(e); } }, {passive:false});
+    hueCanvasEl.addEventListener('touchend', ()=>{ hueDragging=false; });
+
+    return {
+      setFromHex(hex){
+        const {r,g,b} = hexToRgb(hex);
+        const hsv = rgbToHsv(r,g,b);
+        h=hsv.h; s=hsv.s; v=hsv.v;
+        drawSv(); drawHue(); positionMarker();
+      },
+      redraw(){ drawSv(); drawHue(); positionMarker(); }
+    };
+  }
+
+  const cardPicker = makeColorPicker(svCanvas, svMarkerDot, hueCanvas, hex=>{
+    cardColorManual = hex; cardColorAuto = false; cardColorAutoToggle.checked = false;
+    updateSwatch(); drawPreviewFrame(previewT);
+  });
+  const textPicker = makeColorPicker(textSvCanvas, textSvMarkerDot, textHueCanvas, hex=>{
+    cardTextColor = hex; updateSwatch(); drawPreviewFrame(previewT);
+  });
+  cardPicker.setFromHex(activeCardColorHex());
+  textPicker.setFromHex(cardTextColor);
+
+  // curated, higher-contrast palette (warm/cool balance) instead of a
+  // single default swatch — chosen to look intentional in a thumbnail,
+  // not just "whatever the picker landed on"
+  const PRESET_PALETTE = ['#1fae66','#0e3d24','#e63946','#f4a261','#2a9d8f','#264653','#e76f51','#457b9d','#9d4edd','#ffb703','#000000','#ffffff'];
+  presetSwatches.innerHTML = PRESET_PALETTE.map(hex =>
+    `<button type="button" class="preset-swatch" data-hex="${hex}" style="width:28px;height:28px;border-radius:50%;background:${hex};border:1px solid rgba(255,255,255,0.25);cursor:pointer;"></button>`
+  ).join('');
+  presetSwatches.querySelectorAll('.preset-swatch').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      cardColorManual = btn.dataset.hex; cardColorAuto = false; cardColorAutoToggle.checked = false;
+      cardPicker.setFromHex(cardColorManual);
+      updateSwatch(); drawPreviewFrame(previewT);
+    });
+  });
+  customColorToggleBtn.addEventListener('click', ()=>{
+    const opening = customColorBody.style.display === 'none';
+    customColorBody.style.display = opening ? 'block' : 'none';
+    customColorChevron.textContent = opening ? '▴' : '▾';
+    if(opening) cardPicker.redraw();
+  });
+
+  function updateSwatch(){
+    cardColorSwatch.style.background = activeCardFill();
+    if(document.activeElement !== hexInput) hexInput.value = activeCardColorHex();
+    cardAlphaVal.textContent = Math.round(cardColorAlpha*100)+'%';
+    cardTextColorSwatch.style.background = cardTextColor;
+  }
+  hexInput.addEventListener('change', ()=>{
+    let v = hexInput.value.trim();
+    if(!/^#/.test(v)) v = '#'+v;
+    if(!/^#[0-9a-fA-F]{6}$/.test(v)){ hexInput.value = activeCardColorHex(); return; }
+    cardColorManual = v; cardColorAuto = false; cardColorAutoToggle.checked = false;
+    cardPicker.setFromHex(v);
+    updateSwatch(); drawPreviewFrame(previewT);
+  });
+  cardAlphaRange.addEventListener('input', ()=>{
+    cardColorAlpha = +cardAlphaRange.value;
+    updateSwatch();
+    drawPreviewFrame(previewT);
+  });
+  cardColorSwatch.addEventListener('click', ()=>{
+    const opening = cardColorPicker.style.display === 'none';
+    cardColorPicker.style.display = opening ? 'block' : 'none';
+  });
+  cardColorAutoToggle.addEventListener('change', ()=>{
+    cardColorAuto = cardColorAutoToggle.checked;
+    updateSwatch();
+    drawPreviewFrame(previewT);
+  });
+
+  // ---------- card background: solid color or a loaded image + tint ----------
+  function setCardBgMode(mode){
+    cardBgMode = mode;
+    cardBgModeColorBtn.classList.toggle('active', mode==='color');
+    cardBgModeImageBtn.classList.toggle('active', mode==='image');
+    cardBgThumbsWrap.style.display = mode==='image' ? 'block' : 'none';
+    if(mode==='image') renderCardBgThumbs();
+    drawPreviewFrame(previewT);
+  }
+  cardBgModeColorBtn.addEventListener('click', ()=> setCardBgMode('color'));
+  cardBgModeImageBtn.addEventListener('click', ()=> setCardBgMode('image'));
+  setCardBgMode('color');
+
+  function renderCardBgThumbs(){
+    cardBgThumbs.innerHTML = '';
+    images.forEach((slot, idx)=>{
+      if(!slot) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.bgidx = idx;
+      b.style.cssText = `width:44px;height:78px;padding:0;border-radius:3px;overflow:hidden;cursor:pointer;border:2px solid ${cardBgImageIdx===idx ? 'var(--green-bright)' : 'var(--line)'};background:#000;`;
+      b.innerHTML = `<img src="${slot.url}" style="width:100%;height:100%;object-fit:cover;display:block;">`;
+      b.addEventListener('click', ()=>{
+        cardBgImageIdx = idx;
+        renderCardBgThumbs();
+        drawPreviewFrame(previewT);
+      });
+      cardBgThumbs.appendChild(b);
+    });
+  }
+
+  // ---------- word color (default + per-word overrides) & per-word position ----------
+  cardTextColorSwatch.addEventListener('click', ()=>{
+    const opening = cardTextColorPicker.style.display === 'none';
+    cardTextColorPicker.style.display = opening ? 'block' : 'none';
+    if(opening) textPicker.redraw();
+  });
+  document.querySelectorAll('.cw-preset').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      cardTextColor = btn.dataset.color;
+      textPicker.setFromHex(cardTextColor);
+      updateSwatch();
+      drawPreviewFrame(previewT);
+    });
+  });
+
+  const WORD_QUICK_COLORS = ['#ffffff','#050806','#1fae66','#ffb703','#e63946'];
+  function renderCardWordList(){
+    const words = (cardTextInput.value||'').trim().split(/\s+/).filter(Boolean);
+    // drop overrides for words that no longer exist (text was shortened/edited)
+    Object.keys(cardWordColors).forEach(k=>{ if(+k >= words.length) delete cardWordColors[k]; });
+    Object.keys(cardWordPosEnabled).forEach(k=>{ if(+k >= words.length) delete cardWordPosEnabled[k]; });
+    Object.keys(cardWordPos).forEach(k=>{ if(+k >= words.length) delete cardWordPos[k]; });
+
+    cardWordPosList.innerHTML = words.map((w,i)=>{
+      const posActive = !!cardWordPosEnabled[i];
+      const swatches = WORD_QUICK_COLORS.map(c=>
+        `<button type="button" data-wcolor="${i}" data-color="${c}" title="${c}" style="width:15px;height:15px;border-radius:3px;background:${c};border:1px solid ${cardWordColors[i]===c?'var(--green-bright)':'rgba(255,255,255,0.25)'};cursor:pointer;padding:0;"></button>`
+      ).join('');
+      return `
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--paper);" title="${w}">${w}</span>
+          <button type="button" data-pos="${i}" class="align-btn" style="padding:4px 8px;font-size:9.5px;${posActive?'background:var(--green-bright);color:#06120b;border-color:var(--green-bright);':''}">POS</button>
+          <div style="display:flex;gap:3px;">${swatches}</div>
+          <button type="button" data-wreset="${i}" class="align-btn" style="padding:4px 6px;font-size:9.5px;" title="Reset this word">↺</button>
+        </div>`;
+    }).join('');
+
+    cardWordPosList.querySelectorAll('[data-pos]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const i = +btn.dataset.pos;
+        cardWordPosEnabled[i] = !cardWordPosEnabled[i];
+        if(cardWordPosEnabled[i] && !cardWordPos[i]) cardWordPos[i] = { ...cardTextPos };
+        renderCardWordList();
+        updateCapHandle();
+      });
+    });
+    cardWordPosList.querySelectorAll('[data-wcolor]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        cardWordColors[+btn.dataset.wcolor] = btn.dataset.color;
+        renderCardWordList();
+        drawPreviewFrame(previewT);
+      });
+    });
+    cardWordPosList.querySelectorAll('[data-wreset]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const i = +btn.dataset.wreset;
+        delete cardWordColors[i]; delete cardWordPosEnabled[i]; delete cardWordPos[i];
+        renderCardWordList();
+        drawPreviewFrame(previewT);
+      });
+    });
+  }
+  cardTextInput.addEventListener('input', renderCardWordList);
+  renderCardWordList();
+
+  // Samples every loaded image, buckets pixels by hue, picks the most
+  // common hue cluster, then re-renders it as a saturated, mid-dark
+  // accent (not the raw average, which tends to look muddy) so the
+  // card reads as an intentional brand color, not a pixel-average gray.
+  function computeAutoCardColor(){
+    const loaded = images.filter(Boolean);
+    if(!loaded.length) return;
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 24; sampleCanvas.height = 24;
+    const sctx = sampleCanvas.getContext('2d', { willReadFrequently:true });
+    const buckets = {}; // hue bucket (24 buckets of 15deg) -> {count, sSum, vSum}
+    for(const slot of loaded){
+      try{
+        sctx.clearRect(0,0,24,24);
+        sctx.drawImage(slot.img, 0, 0, 24, 24);
+        const data = sctx.getImageData(0,0,24,24).data;
+        for(let i=0;i<data.length;i+=4){
+          const r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+          if(a<200) continue;
+          const mx=Math.max(r,g,b), mn=Math.min(r,g,b);
+          const light = mx/255;
+          if(light<0.06 || light>0.96) continue; // skip near-black/white, they don't carry color identity
+          const {h,s} = rgbToHsv(r,g,b);
+          if(s<0.12) continue; // skip near-gray pixels
+          const bucket = Math.floor(h/15)%24;
+          if(!buckets[bucket]) buckets[bucket] = { count:0, sSum:0 };
+          buckets[bucket].count++;
+          buckets[bucket].sSum += s;
+        }
+      } catch(err){ /* cross-origin or decode issue — skip this image */ }
+    }
+    const keys = Object.keys(buckets);
+    if(!keys.length){ cardColorComputed = '#0e3d24'; updateSwatch(); if(cardColorAuto) drawPreviewFrame(previewT); return; }
+    let bestKey = keys[0];
+    for(const k of keys){ if(buckets[k].count > buckets[bestKey].count) bestKey = k; }
+    const b = buckets[bestKey];
+    const hue = (+bestKey)*15 + 7.5;
+    const avgSat = b.sSum/b.count;
+    // re-render as an attractive accent: healthy saturation, mid-dark value,
+    // rather than the literal (often desaturated/dark) dominant pixel color
+    const finalSat = Math.min(0.85, Math.max(0.55, avgSat*1.3));
+    const finalVal = 0.30;
+    cardColorComputed = hsvToHex(hue, finalSat, finalVal);
+    updateSwatch();
+    if(cardColorAuto) drawPreviewFrame(previewT);
+  }
+  updateSwatch();
 
   function wireStepper(input, minusBtn, plusBtn, min, max, step, onChange){
     function set(v){
@@ -1280,10 +1715,29 @@
     }
     return null;
   }
+  function cardWordIndexAtTime(t){
+    const segs = getSegments();
+    let acc = 0;
+    for(const s of segs){
+      if(t < acc + s.dur || s === segs[segs.length-1]){
+        if(s.type !== 'card') return null;
+        return cardWordIndexAt(cardTextInput.value, Math.max(0,t-acc), s.dur);
+      }
+      acc += s.dur;
+    }
+    return null;
+  }
   function activePos(){
     const type = activeSegType(previewT);
     if(type === 'hook') return hookCaptionPos;
-    if(type === 'card') return cardTextPos;
+    if(type === 'card'){
+      const wIdx = cardWordIndexAtTime(previewT);
+      if(wIdx!=null && cardWordPosEnabled[wIdx]){
+        if(!cardWordPos[wIdx]) cardWordPos[wIdx] = { ...cardTextPos };
+        return cardWordPos[wIdx];
+      }
+      return cardTextPos;
+    }
     const idx = activeShowIdx(previewT);
     if(idx!=null && capPosOverride[idx]) return capPosOverride[idx];
     return captionPos;
@@ -1363,7 +1817,7 @@
       const url = URL.createObjectURL(f);
       const img = new Image();
       const s = slot;
-      img.onload = ()=>{ images[s] = {file:f, url, img}; renderTray(); updateGenState(); };
+      img.onload = ()=>{ images[s] = {file:f, url, img}; renderTray(); updateGenState(); computeAutoCardColor(); };
       img.src = url;
       slot++;
       while(slot < N && images[slot]) slot++;
@@ -1568,6 +2022,7 @@
       pendingManifestData = null;
       manifestImagesBtn.style.display = 'none';
       setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
+      computeAutoCardColor();
     }
   }
   ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
@@ -1673,7 +2128,7 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 1;
+  const IDB_VERSION = 2;
   function openDB(){
     return new Promise((resolve,reject)=>{
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
@@ -1681,6 +2136,7 @@
         const db = req.result;
         if(!db.objectStoreNames.contains('templates')) db.createObjectStore('templates');
         if(!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath:'id', autoIncrement:true });
+        if(!db.objectStoreNames.contains('voiceovers')) db.createObjectStore('voiceovers', { keyPath:'id', autoIncrement:true });
       };
       req.onsuccess = ()=>resolve(req.result);
       req.onerror = ()=>reject(req.error);
@@ -1756,7 +2212,8 @@
       hookCaptionTextValue: hookCapText.value,
       captions: captions.slice(),
       images: images.map(slot => slot ? slot.file : null), // File objects are Blobs — store directly
-      audioFile: audioFile || null
+      audioFile: audioFile || null,
+      cardColorAuto, cardColorManual, cardColorAlpha
     };
   }
 
@@ -1779,6 +2236,11 @@
     if(typeof t.hookWordByWord === 'boolean') hookWordByWord = t.hookWordByWord;
     if(typeof t.showWordByWord === 'boolean') showWordByWord = t.showWordByWord;
     if(Array.isArray(t.captions) && t.captions.length === N) captions = t.captions.slice();
+    if(typeof t.cardColorAuto === 'boolean') cardColorAuto = t.cardColorAuto;
+    if(typeof t.cardColorManual === 'string') cardColorManual = t.cardColorManual;
+    if(typeof t.cardColorAlpha === 'number') cardColorAlpha = t.cardColorAlpha;
+    cardColorAutoToggle.checked = cardColorAuto;
+    cardAlphaRange.value = cardColorAlpha;
 
     // reflect every value back into the actual UI controls, so what's on
     // screen always matches what was loaded
@@ -1831,6 +2293,8 @@
     renderCaptions();
     updateGenState();
     updateCapHandle();
+    computeAutoCardColor();
+    updateSwatch();
 
     // restore audio (mp3 Blob) if the template has one
     if(t.audioFile){
@@ -2011,8 +2475,11 @@
   }
   async function saveVideoToGallery(blob){
     const name = await nextVideoName();
-    await idbPut('videos', { name, blob, createdAt: Date.now() });
+    const template = await collectTemplate().catch(()=>null);
+    const id = await idbPut('videos', { name, blob, createdAt: Date.now(), template });
     await refreshAllGalleries();
+    await attemptAutoMatchVoiceovers().catch(err=>console.error('voiceover auto-match failed', err));
+    return id;
   }
   function dayKey(ts){
     const d = new Date(ts);
@@ -2051,16 +2518,18 @@
         const url = URL.createObjectURL(v.blob);
         urlsRef.push(url);
         const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;';
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;flex-wrap:wrap;';
         const dt = new Date(v.createdAt);
+        const hasVoice = !!(v.template && v.template.audioFile);
         row.innerHTML = `
-          <div data-play="${v.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+          <div data-edit="${v.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;flex:1;min-width:0;" title="Open in editor">
             <video src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="metadata"></video>
             <div style="flex:1;min-width:0;">
-              <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}</div>
-              <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · tap to play</div>
+              <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}${hasVoice ? ' <span style="color:var(--green-bright);" title="Voice-over attached">🔊</span>' : ''}</div>
+              <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · tap to edit</div>
             </div>
           </div>
+          <button type="button" class="align-btn" data-play="${v.id}" style="padding:6px 8px;" title="Preview">▶</button>
           <a href="${url}" download="${v.name.replace(/\s+/g,'-').toLowerCase()}.mp4" class="align-btn" style="text-decoration:none;padding:6px 8px;">Download</a>
           <button type="button" class="align-btn" data-del="${v.id}" style="padding:6px 8px;">Delete</button>
         `;
@@ -2069,7 +2538,8 @@
     }
 
     container.querySelectorAll('[data-play]').forEach(el=>{
-      el.addEventListener('click', async ()=>{
+      el.addEventListener('click', async (e)=>{
+        e.stopPropagation();
         const id = +el.dataset.play;
         const v = await idbGet('videos', id);
         if(!v) return;
@@ -2082,8 +2552,31 @@
       });
     });
 
+    container.querySelectorAll('[data-edit]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = +el.dataset.edit;
+        const v = await idbGet('videos', id);
+        if(!v) return;
+        if(!v.template){
+          showTmplStatus('This video was made before editing was supported — no project data to reopen.', true);
+          return;
+        }
+        try{
+          await applyTemplate(v.template);
+          await saveTemplateToStorage();
+          galleryModalOverlay.classList.remove('on');
+          showTmplStatus(`Reopened "${v.name}" for editing.`);
+          window.scrollTo({top:0, behavior:'smooth'});
+        } catch(err){
+          console.error('reopen failed', err);
+          showTmplStatus('Could not reopen that video.', true);
+        }
+      });
+    });
+
     container.querySelectorAll('[data-del]').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
         await idbDelete('videos', +btn.dataset.del);
         await refreshAllGalleries();
       });
@@ -2107,6 +2600,284 @@
   openGalleryBtn.addEventListener('click', ()=>{ galleryModalOverlay.classList.add('on'); });
   galleryModalClose.addEventListener('click', ()=>{ galleryModalOverlay.classList.remove('on'); });
   galleryModalOverlay.addEventListener('click', e=>{ if(e.target === galleryModalOverlay) galleryModalOverlay.classList.remove('on'); });
+
+  // ---------- bulk voice-over library: upload, transcribe, auto-match to gallery videos ----------
+  const voiceLibModalOverlay = document.getElementById('voiceLibModalOverlay');
+  const voiceLibModalClose = document.getElementById('voiceLibModalClose');
+  const openVoiceLibBtn = document.getElementById('openVoiceLibBtn');
+  const qbVoiceCount = document.getElementById('qbVoiceCount');
+  const voMultiInput = document.getElementById('voMultiInput');
+  const voDropZone = document.getElementById('voDropZone');
+  const voTranscribeAllBtn = document.getElementById('voTranscribeAllBtn');
+  const voRematchBtn = document.getElementById('voRematchBtn');
+  const voStatus = document.getElementById('voStatus');
+  const voList = document.getElementById('voList');
+  const voEmpty = document.getElementById('voEmpty');
+  const VO_GAP_MS = 150000; // 2.5 minutes between Groq requests, per-request
+
+  openVoiceLibBtn.addEventListener('click', ()=>{ voiceLibModalOverlay.classList.add('on'); renderVoiceList(); });
+  voiceLibModalClose.addEventListener('click', ()=>{ voiceLibModalOverlay.classList.remove('on'); });
+  voiceLibModalOverlay.addEventListener('click', e=>{ if(e.target === voiceLibModalOverlay) voiceLibModalOverlay.classList.remove('on'); });
+
+  function setVoStatus(msg, isError){
+    voStatus.textContent = msg;
+    voStatus.style.color = isError ? '#e0866a' : 'var(--green-bright)';
+  }
+
+  async function addVoiceoverFiles(fileList){
+    const files = Array.from(fileList).filter(f => f.type.startsWith('audio/') || /\.mp3$/i.test(f.name));
+    if(!files.length) return;
+    for(const f of files){
+      // saved immediately — mp3s must never depend on staying in memory
+      await idbPut('voiceovers', { name: f.name, blob: f, transcript: null, status: 'pending', matchedVideoId: null, confidence: 0, createdAt: Date.now() });
+    }
+    setVoStatus(`Added ${files.length} MP3${files.length===1?'':'s'} — saved.`);
+    await renderVoiceList();
+  }
+  voMultiInput.addEventListener('change', e=>{ addVoiceoverFiles(e.target.files); voMultiInput.value=''; });
+  ['dragenter','dragover'].forEach(ev=>voDropZone.addEventListener(ev,e=>{e.preventDefault();voDropZone.classList.add('drag');}));
+  ['dragleave'].forEach(ev=>voDropZone.addEventListener(ev,e=>{e.preventDefault();voDropZone.classList.remove('drag');}));
+  voDropZone.addEventListener('drop', e=>{
+    e.preventDefault();
+    voDropZone.classList.remove('drag');
+    if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addVoiceoverFiles(e.dataTransfer.files);
+  });
+
+  async function transcribeAudioWithGroq(file, apiKey){
+    const form = new FormData();
+    form.append('file', file);
+    form.append('model', 'whisper-large-v3');
+    form.append('response_format', 'verbose_json');
+    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: form
+    });
+    if(!res.ok){
+      const txt = await res.text().catch(()=> '');
+      throw new Error(`Groq error ${res.status}: ${txt.slice(0,200)}`);
+    }
+    const data = await res.json();
+    return (data.text || '').trim();
+  }
+
+  function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+  voTranscribeAllBtn.addEventListener('click', async ()=>{
+    const apiKey = groqKeyInput.value.trim();
+    if(!apiKey){ setVoStatus('Add your Groq API key in the audio panel first.', true); return; }
+    const all = await idbGetAll('voiceovers');
+    const pending = all.filter(v => v.status !== 'done');
+    if(!pending.length){ setVoStatus('Nothing left to transcribe.'); return; }
+
+    voTranscribeAllBtn.disabled = true;
+    for(let i=0;i<pending.length;i++){
+      const v = pending[i];
+      setVoStatus(`Transcribing ${i+1}/${pending.length} — "${v.name}"…`);
+      v.status = 'transcribing';
+      await idbPut('voiceovers', v, v.id);
+      await renderVoiceList();
+      try{
+        const text = await transcribeAudioWithGroq(v.blob, apiKey);
+        v.transcript = text;
+        v.status = 'done';
+        await idbPut('voiceovers', v, v.id);
+        setVoStatus(`Transcribed "${v.name}".`);
+      } catch(err){
+        console.error('transcription failed', err);
+        v.status = 'error';
+        v.error = err.message;
+        await idbPut('voiceovers', v, v.id);
+        setVoStatus(`Failed on "${v.name}": ${err.message}`, true);
+      }
+      await renderVoiceList();
+      if(i < pending.length-1){
+        setVoStatus(`Waiting 2.5 minutes before the next MP3 (${i+1}/${pending.length} done)…`);
+        await sleep(VO_GAP_MS);
+      }
+    }
+    voTranscribeAllBtn.disabled = false;
+    setVoStatus('Transcription complete — matching against gallery videos…');
+    await attemptAutoMatchVoiceovers();
+    setVoStatus('Done — review matches below.');
+  });
+
+  // ---------- matching: transcript <-> gallery video captions ----------
+  const STOPWORDS = new Set(['the','a','an','to','of','and','or','is','in','on','for','with','my','your','this','that','it','at','by','you','get','free','guide','watch','comment','i','me','we']);
+  function normWords(s){
+    return (s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(w=>w && !STOPWORDS.has(w));
+  }
+  // Score how well one caption phrase is present in the transcript: full
+  // substring match scores 1, otherwise partial credit by word overlap.
+  // Also returns the earliest position (word index) it was found at, so
+  // callers can check whether captions occur in the same order they were
+  // shown in the video, not just whether the words exist somewhere.
+  function matchPhraseInTranscript(caption, transcriptWords, transcriptNorm){
+    const capNorm = (caption||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').trim();
+    if(!capNorm) return { score:0, pos:-1 };
+    if(capNorm.length > 2 && transcriptNorm.includes(capNorm)){
+      const charPos = transcriptNorm.indexOf(capNorm);
+      const pos = transcriptNorm.slice(0,charPos).split(/\s+/).length;
+      return { score:1, pos };
+    }
+    const capWords = normWords(caption);
+    if(!capWords.length) return { score:0, pos:-1 };
+    let hits = 0, firstPos = -1;
+    for(const w of capWords){
+      const idx = transcriptWords.indexOf(w);
+      if(idx !== -1){ hits++; if(firstPos===-1 || idx<firstPos) firstPos = idx; }
+    }
+    const score = hits/capWords.length;
+    return { score, pos: score>0 ? firstPos : -1 };
+  }
+  // Combines coverage (how many captions are actually spoken) with an
+  // order signal (longest increasing run of matched captions in the same
+  // sequence they appear in the video) — deliberately more than a plain
+  // keyword-overlap check, so a transcript can't accidentally "win" a
+  // video just by sharing a few common words out of order.
+  function scoreTranscriptAgainstVideo(transcript, captions){
+    const transcriptNorm = (transcript||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+    const transcriptWords = normWords(transcript);
+    if(!transcriptWords.length) return { confidence:0, coverage:0, order:0 };
+    const found = [];
+    captions.forEach((cap, idx)=>{
+      if(!cap || !cap.trim()) return;
+      const { score, pos } = matchPhraseInTranscript(cap, transcriptWords, transcriptNorm);
+      if(score >= 0.5) found.push({ idx, pos, score });
+    });
+    const totalCaps = captions.filter(c=>c && c.trim()).length || 1;
+    const coverage = found.length / totalCaps;
+    // longest increasing subsequence of original caption indices, in the
+    // order they were found in the transcript (by transcript position)
+    found.sort((a,b)=>a.pos-b.pos);
+    let order = 0;
+    if(found.length){
+      const tails = [];
+      for(const f of found){
+        let lo=0, hi=tails.length;
+        while(lo<hi){ const mid=(lo+hi)>>1; if(tails[mid] < f.idx) lo=mid+1; else hi=mid; }
+        tails[lo] = f.idx;
+      }
+      order = tails.length / found.length;
+    }
+    const confidence = 0.6*coverage + 0.4*order;
+    return { confidence, coverage, order };
+  }
+
+  // Greedy global assignment: score every (voiceover, video) pair, then
+  // assign highest-confidence pairs first, skipping anything already
+  // claimed and anything under the confidence floor — so one loud partial
+  // match can't steal a video from a better-fitting MP3 uploaded later.
+  async function attemptAutoMatchVoiceovers(){
+    const CONFIDENCE_FLOOR = 0.6;
+    const voiceovers = (await idbGetAll('voiceovers')).filter(v => v.transcript && !v.matchedVideoId);
+    const videos = (await idbGetAll('videos')).filter(v => v.template && Array.isArray(v.template.captions) && !v.template.audioFile);
+    if(!voiceovers.length || !videos.length) return;
+
+    const pairs = [];
+    for(const vo of voiceovers){
+      for(const vid of videos){
+        const { confidence } = scoreTranscriptAgainstVideo(vo.transcript, vid.template.captions);
+        if(confidence >= CONFIDENCE_FLOOR) pairs.push({ vo, vid, confidence });
+      }
+    }
+    pairs.sort((a,b)=> b.confidence - a.confidence);
+    const claimedVo = new Set(), claimedVid = new Set();
+    for(const p of pairs){
+      if(claimedVo.has(p.vo.id) || claimedVid.has(p.vid.id)) continue;
+      claimedVo.add(p.vo.id); claimedVid.add(p.vid.id);
+      p.vo.matchedVideoId = p.vid.id;
+      p.vo.confidence = p.confidence;
+      await idbPut('voiceovers', p.vo, p.vo.id);
+      p.vid.template.audioFile = p.vo.blob;
+      p.vid.template.audioFileName = p.vo.name;
+      p.vid.voiceoverId = p.vo.id;
+      await idbPut('videos', p.vid, p.vid.id);
+    }
+    await refreshAllGalleries();
+    await renderVoiceList();
+  }
+
+  voRematchBtn.addEventListener('click', async ()=>{
+    setVoStatus('Re-matching…');
+    await attemptAutoMatchVoiceovers();
+    setVoStatus('Matching pass complete.');
+  });
+
+  // manually attach a voiceover to a specific gallery video (or detach)
+  async function assignVoiceoverToVideo(voId, videoId){
+    const vo = await idbGet('voiceovers', voId);
+    if(!vo) return;
+    // free up whatever video it was previously attached to
+    if(vo.matchedVideoId){
+      const prev = await idbGet('videos', vo.matchedVideoId);
+      if(prev && prev.voiceoverId === vo.id){
+        prev.template.audioFile = null; prev.template.audioFileName = null; prev.voiceoverId = null;
+        await idbPut('videos', prev, prev.id);
+      }
+    }
+    if(videoId){
+      const vid = await idbGet('videos', videoId);
+      if(vid){
+        // if that video already had a different voiceover, detach it back to the pool
+        if(vid.voiceoverId && vid.voiceoverId !== vo.id){
+          const otherVo = await idbGet('voiceovers', vid.voiceoverId);
+          if(otherVo){ otherVo.matchedVideoId = null; otherVo.confidence = 0; await idbPut('voiceovers', otherVo, otherVo.id); }
+        }
+        vid.template.audioFile = vo.blob;
+        vid.template.audioFileName = vo.name;
+        vid.voiceoverId = vo.id;
+        await idbPut('videos', vid, vid.id);
+        vo.matchedVideoId = videoId;
+      }
+    } else {
+      vo.matchedVideoId = null;
+      vo.confidence = 0;
+    }
+    await idbPut('voiceovers', vo, vo.id);
+    await refreshAllGalleries();
+    await renderVoiceList();
+  }
+
+  async function renderVoiceList(){
+    const all = (await idbGetAll('voiceovers')).sort((a,b)=> b.createdAt - a.createdAt);
+    const videos = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
+    voEmpty.style.display = all.length ? 'none' : 'block';
+    if(all.length){ qbVoiceCount.textContent = all.length; qbVoiceCount.style.display = 'inline-block'; }
+    else qbVoiceCount.style.display = 'none';
+
+    voList.innerHTML = '';
+    for(const v of all){
+      const row = document.createElement('div');
+      row.style.cssText = 'border:1px solid var(--line);border-radius:4px;padding:10px;';
+      const statusLabel = { pending:'Not transcribed', transcribing:'Transcribing…', done:'Transcribed', error:'Failed' }[v.status] || v.status;
+      const statusColor = v.status==='error' ? '#e0866a' : v.status==='done' ? 'var(--green-bright)' : 'rgba(242,240,230,0.55)';
+      const matchedVideo = v.matchedVideoId ? videos.find(vid=>vid.id===v.matchedVideoId) : null;
+      const options = ['<option value="">— none —</option>']
+        .concat(videos.map(vid => `<option value="${vid.id}" ${v.matchedVideoId===vid.id?'selected':''}>${vid.name}${vid.voiceoverId && vid.voiceoverId!==v.id ? ' (has voice)' : ''}</option>`));
+      row.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--paper);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v.name}</div>
+          <div style="font-size:9.5px;color:${statusColor};white-space:nowrap;">${statusLabel}</div>
+        </div>
+        ${v.transcript ? `<div style="font-size:9.5px;color:rgba(242,240,230,0.6);margin-top:6px;line-height:1.5;max-height:54px;overflow:hidden;">${v.transcript}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <span style="font-size:9.5px;color:rgba(242,240,230,0.55);white-space:nowrap;">Match:</span>
+          <select data-assign="${v.id}" style="flex:1;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);font-size:10.5px;">${options.join('')}</select>
+          ${matchedVideo ? `<span style="font-size:9.5px;color:${v.confidence>=0.6?'var(--green-bright)':'#e0a84a'};white-space:nowrap;">${Math.round(v.confidence*100)}%</span>` : ''}
+        </div>
+      `;
+      voList.appendChild(row);
+    }
+    voList.querySelectorAll('[data-assign]').forEach(sel=>{
+      sel.addEventListener('change', ()=>{
+        const voId = +sel.dataset.assign;
+        const videoId = sel.value ? +sel.value : null;
+        assignVoiceoverToVideo(voId, videoId);
+      });
+    });
+  }
+  renderVoiceList();
 
   function closePlayer(){
     playerVideo.pause();
@@ -2153,7 +2924,7 @@
   }
 
   // ---------- generic word-by-word text ----------
-  function drawWordByWord(text, localT, dur, fontSize, x, y, align){
+  function drawWordByWord(text, localT, dur, fontSize, x, y, align, fillColor){
     const words = (text||'').trim().split(/\s+/).filter(Boolean);
     if(words.length === 0) return;
     const per = dur / words.length;
@@ -2168,7 +2939,7 @@
       fs -= 4;
       ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
     }
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = fillColor || '#ffffff';
     let xx = x;
     if(align==='left') xx = Math.max(48, x);
     if(align==='right') xx = Math.min(W-48, x);
@@ -2176,12 +2947,31 @@
     return { words, wIdx, fontSizeUsed: fs };
   }
 
-  function drawCard(text, localT, dur){
-    ctx.fillStyle = '#0e3d24';
-    ctx.fillRect(0,0,W,H);
+  function cardWordIndexAt(text, localT, dur){
+    const words = (text||'').trim().split(/\s+/).filter(Boolean);
+    if(!words.length) return 0;
+    const per = dur / words.length;
+    return Math.max(0, Math.min(words.length-1, Math.floor(localT/per)));
+  }
 
-    const cx = cardTextPos.xNorm*W, cy = cardTextPos.yNorm*H;
-    const res = drawWordByWord(text, localT, dur, cardFontSize*SIZE_SCALE, cx, cy, 'center');
+  function drawCard(text, localT, dur){
+    const wIdx = cardWordIndexAt(text, localT, dur);
+
+    if(cardBgMode === 'image' && cardBgImageIdx != null && images[cardBgImageIdx]){
+      ctx.fillStyle = '#050806';
+      ctx.fillRect(0,0,W,H);
+      coverDraw(images[cardBgImageIdx].img, 0, 0, W, H);
+      ctx.fillStyle = activeCardFill(); // semi-transparent tint over the image, keeps the word readable
+      ctx.fillRect(0,0,W,H);
+    } else {
+      ctx.fillStyle = activeCardFill();
+      ctx.fillRect(0,0,W,H);
+    }
+
+    const pos = (cardWordPosEnabled[wIdx] && cardWordPos[wIdx]) ? cardWordPos[wIdx] : cardTextPos;
+    const cx = pos.xNorm*W, cy = pos.yNorm*H;
+    const color = cardWordColors[wIdx] || cardTextColor;
+    const res = drawWordByWord(text, localT, dur, cardFontSize*SIZE_SCALE, cx, cy, 'center', color);
     if(!res) return;
   }
 
