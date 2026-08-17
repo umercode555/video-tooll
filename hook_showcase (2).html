@@ -240,6 +240,18 @@
     height:100%;
     display:block;
   }
+  .frame:fullscreen{
+    height:100vh;
+    width:auto;
+    max-width:100vw;
+    background:#000;
+  }
+  .frame:-webkit-full-screen{
+    height:100vh;
+    width:auto;
+    max-width:100vw;
+    background:#000;
+  }
   .frame .empty{
     position:absolute;inset:0;
     display:flex;
@@ -702,6 +714,7 @@
       <canvas id="cv" width="1080" height="1920"></canvas>
       <div class="empty" id="emptyState">Load 10 images<br>to preview the cut</div>
       <div class="cap-handle" id="capHandle" title="Drag to position caption"></div>
+      <button type="button" id="fullscreenBtn" title="Fullscreen preview" style="position:absolute;top:10px;right:10px;width:32px;height:32px;border-radius:6px;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.2);color:#fff;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:5;">⛶</button>
     </div>
 
     <div class="transport">
@@ -762,13 +775,13 @@
       <label>Structure &amp; timing</label>
       <div class="timing-row">
         <span>Hook flash</span>
-        <input type="range" id="hookDurRange" min="0.1" max="1" step="0.05" value="0.2">
-        <span class="val" id="hookDurVal">0.20s</span>
+        <input type="range" id="hookDurRange" min="0.1" max="1" step="0.01" value="0.2">
+        <span style="display:flex;align-items:center;gap:2px;"><input type="number" id="hookDurNum" min="0.1" max="1" step="0.01" value="0.20" style="width:56px;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:5px 4px;text-align:right;">s</span>
       </div>
       <div class="timing-row">
         <span>Card length</span>
-        <input type="range" id="cardDurRange" min="1" max="10" step="0.5" value="3">
-        <span class="val" id="cardDurVal">3.0s</span>
+        <input type="range" id="cardDurRange" min="1" max="10" step="0.01" value="3">
+        <span style="display:flex;align-items:center;gap:2px;"><input type="number" id="cardDurNum" min="1" max="10" step="0.01" value="3.00" style="width:56px;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:5px 4px;text-align:right;">s</span>
       </div>
       <div class="timing-row">
         <span>Card position</span>
@@ -831,9 +844,7 @@
         <div id="textSvMarker" style="position:relative;width:0;height:0;"><div style="position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.6);pointer-events:none;transform:translate(-5px,-5px);top:0;left:0;" id="textSvMarkerDot"></div></div>
         <canvas id="textHueCanvas" width="220" height="14" style="width:100%;height:14px;border-radius:4px;cursor:pointer;display:block;margin-top:10px;"></canvas>
       </div>
-      <div class="hint" id="cardWordColorHint" style="margin-top:-4px;margin-bottom:10px;">Applies to every word by default — give a single word its own color below.</div>
-
-      <div id="cardWordPosList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+      <div class="hint" id="cardWordColorHint" style="margin-top:-4px;margin-bottom:10px;">Applies to the whole card word reveal. Per-image caption colors are set individually — click the 🎨 next to a caption below.</div>
 
       <div class="timing-row">
         <span>Image length</span>
@@ -966,6 +977,7 @@
     <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
       Upload every MP3 voice-over at once. Run transcription, then each one gets auto-matched to the gallery video whose captions/products it talks about — in order, not just keyword overlap. Review and reassign anything uncertain before exporting.
     </div>
+    <div id="voKeyStatus" style="font-size:9.5px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;"></div>
     <label for="voMultiInput" class="drop" id="voDropZone" style="padding:16px;margin-bottom:10px;">
       <input type="file" id="voMultiInput" accept="audio/mp3,audio/mpeg,audio/*" multiple>
       <div class="dt">Drop or select MP3s</div>
@@ -975,6 +987,7 @@
       <button type="button" id="voTranscribeAllBtn" class="align-btn" style="flex:1;">▶ Run transcription (2.5 min apart)</button>
       <button type="button" id="voRematchBtn" class="align-btn">Re-match all</button>
     </div>
+    <audio id="voPlayer" style="display:none;"></audio>
     <div id="voStatus" style="font-size:9.5px;color:var(--green-bright);margin-bottom:10px;min-height:12px;"></div>
     <div id="voList" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div id="voEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No voice-overs uploaded yet.</div>
@@ -1028,9 +1041,10 @@
   let cardBgImageIdx = null;         // which loaded image (0..N-1) sits behind the card
   let cardTextColor = '#ffffff';     // default color for every card word
   let textHueVal = 0, textSatVal = 0, textValVal = 1; // HSV of the word-color picker
-  let cardWordColors = {};           // {wordIndex: hex} per-word override
-  let cardWordPosEnabled = {};       // {wordIndex: true} — word can be dragged independently
-  let cardWordPos = {};              // {wordIndex: {xNorm,yNorm}} — that word's own position
+  let cardWordColors = {};           // {wordIndex: hex} per-word override (currently unused by UI, kept inert)
+  let cardWordPosEnabled = {};       // {wordIndex: true} (currently unused by UI, kept inert)
+  let cardWordPos = {};              // {wordIndex: {xNorm,yNorm}} (currently unused by UI, kept inert)
+  let capTextColor = {};             // {captionIndex: hex} — per-image caption text color
 
   let images = new Array(N).fill(null); // {file, url, img}
   let captions = new Array(N).fill('');
@@ -1069,12 +1083,12 @@
   const textSvMarkerDot = document.getElementById('textSvMarkerDot');
   const textHueCanvas = document.getElementById('textHueCanvas');
   const textHueCtx = textHueCanvas.getContext('2d');
-  const cardWordPosList = document.getElementById('cardWordPosList');
   const genBtn = document.getElementById('genBtn');
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
   const emptyState = document.getElementById('emptyState');
   const playBtn = document.getElementById('playBtn');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
   const playIcon = document.getElementById('playIcon');
   const timecode = document.getElementById('timecode');
   const progFill = document.getElementById('progFill');
@@ -1086,9 +1100,9 @@
   const dlLink = document.getElementById('dlLink');
   const tmplStrip = document.getElementById('tmplStrip');
   const hookDurRange = document.getElementById('hookDurRange');
-  const hookDurVal = document.getElementById('hookDurVal');
+  const hookDurNum = document.getElementById('hookDurNum');
   const cardDurRange = document.getElementById('cardDurRange');
-  const cardDurVal = document.getElementById('cardDurVal');
+  const cardDurNum = document.getElementById('cardDurNum');
   const cardPosSelect = document.getElementById('cardPosSelect');
   const showDurRange = document.getElementById('showDurRange');
   const showDurVal = document.getElementById('showDurVal');
@@ -1182,12 +1196,24 @@
 
   hookDurRange.addEventListener('input', ()=>{
     hookDur = +hookDurRange.value;
-    hookDurVal.textContent = hookDur.toFixed(2)+'s';
+    hookDurNum.value = hookDur.toFixed(2);
+    refreshAll();
+  });
+  hookDurNum.addEventListener('input', ()=>{
+    const v = Math.max(0.1, Math.min(1, +hookDurNum.value || 0.1));
+    hookDur = v;
+    hookDurRange.value = v;
     refreshAll();
   });
   cardDurRange.addEventListener('input', ()=>{
     cardDur = +cardDurRange.value;
-    cardDurVal.textContent = cardDur.toFixed(1)+'s';
+    cardDurNum.value = cardDur.toFixed(2);
+    refreshAll();
+  });
+  cardDurNum.addEventListener('input', ()=>{
+    const v = Math.max(1, Math.min(10, +cardDurNum.value || 1));
+    cardDur = v;
+    cardDurRange.value = v;
     refreshAll();
   });
   cardPosSelect.addEventListener('change', ()=>{
@@ -1413,56 +1439,6 @@
       drawPreviewFrame(previewT);
     });
   });
-
-  const WORD_QUICK_COLORS = ['#ffffff','#050806','#1fae66','#ffb703','#e63946'];
-  function renderCardWordList(){
-    const words = (cardTextInput.value||'').trim().split(/\s+/).filter(Boolean);
-    // drop overrides for words that no longer exist (text was shortened/edited)
-    Object.keys(cardWordColors).forEach(k=>{ if(+k >= words.length) delete cardWordColors[k]; });
-    Object.keys(cardWordPosEnabled).forEach(k=>{ if(+k >= words.length) delete cardWordPosEnabled[k]; });
-    Object.keys(cardWordPos).forEach(k=>{ if(+k >= words.length) delete cardWordPos[k]; });
-
-    cardWordPosList.innerHTML = words.map((w,i)=>{
-      const posActive = !!cardWordPosEnabled[i];
-      const swatches = WORD_QUICK_COLORS.map(c=>
-        `<button type="button" data-wcolor="${i}" data-color="${c}" title="${c}" style="width:15px;height:15px;border-radius:3px;background:${c};border:1px solid ${cardWordColors[i]===c?'var(--green-bright)':'rgba(255,255,255,0.25)'};cursor:pointer;padding:0;"></button>`
-      ).join('');
-      return `
-        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;">
-          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--paper);" title="${w}">${w}</span>
-          <button type="button" data-pos="${i}" class="align-btn" style="padding:4px 8px;font-size:9.5px;${posActive?'background:var(--green-bright);color:#06120b;border-color:var(--green-bright);':''}">POS</button>
-          <div style="display:flex;gap:3px;">${swatches}</div>
-          <button type="button" data-wreset="${i}" class="align-btn" style="padding:4px 6px;font-size:9.5px;" title="Reset this word">↺</button>
-        </div>`;
-    }).join('');
-
-    cardWordPosList.querySelectorAll('[data-pos]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const i = +btn.dataset.pos;
-        cardWordPosEnabled[i] = !cardWordPosEnabled[i];
-        if(cardWordPosEnabled[i] && !cardWordPos[i]) cardWordPos[i] = { ...cardTextPos };
-        renderCardWordList();
-        updateCapHandle();
-      });
-    });
-    cardWordPosList.querySelectorAll('[data-wcolor]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        cardWordColors[+btn.dataset.wcolor] = btn.dataset.color;
-        renderCardWordList();
-        drawPreviewFrame(previewT);
-      });
-    });
-    cardWordPosList.querySelectorAll('[data-wreset]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const i = +btn.dataset.wreset;
-        delete cardWordColors[i]; delete cardWordPosEnabled[i]; delete cardWordPos[i];
-        renderCardWordList();
-        drawPreviewFrame(previewT);
-      });
-    });
-  }
-  cardTextInput.addEventListener('input', renderCardWordList);
-  renderCardWordList();
 
   // Samples every loaded image, buckets pixels by hue, picks the most
   // common hue cluster, then re-renders it as a saturated, mid-dark
@@ -2078,10 +2054,23 @@
   function renderCaptions(){
     capList.innerHTML = '';
     for(let i=0;i<N;i++){
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;';
       const row = document.createElement('div');
       row.className = 'cap-row';
-      row.innerHTML = `<span class="idx">${i+1}</span><input type="text" class="capText" data-i="${i}" placeholder="${images[i] ? 'caption '+(i+1) : '— empty slot —'}" value="${captions[i]||''}" maxlength="60" style="flex:1;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;"><input type="number" class="capDur" data-i="${i}" min="0.2" max="5" step="0.1" value="${showDur[i].toFixed(1)}" title="seconds for this image"><label style="display:flex;align-items:center;gap:3px;font-size:9px;color:rgba(242,240,230,0.6);white-space:nowrap;" title="Give caption ${i+1} its own position, independent of the others"><input type="checkbox" class="capCustomPos" data-i="${i}" ${capPosOverride[i] ? 'checked' : ''}>pos</label>`;
-      capList.appendChild(row);
+      const curColor = capTextColor[i] || '#ffffff';
+      row.innerHTML = `<span class="idx">${i+1}</span><input type="text" class="capText" data-i="${i}" placeholder="${images[i] ? 'caption '+(i+1) : '— empty slot —'}" value="${captions[i]||''}" maxlength="60" style="flex:1;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;"><input type="number" class="capDur" data-i="${i}" min="0.2" max="20" step="0.01" value="${showDur[i].toFixed(2)}" title="seconds for this image — type any value"><button type="button" class="align-btn capColorToggle" data-i="${i}" title="Caption text color" style="padding:5px 7px;font-size:10px;flex:0 0 auto;">🎨</button><label style="display:flex;align-items:center;gap:3px;font-size:9px;color:rgba(242,240,230,0.6);white-space:nowrap;" title="Give caption ${i+1} its own position, independent of the others"><input type="checkbox" class="capCustomPos" data-i="${i}" ${capPosOverride[i] ? 'checked' : ''}>pos</label>`;
+      const pop = document.createElement('div');
+      pop.className = 'cap-color-pop';
+      pop.dataset.i = i;
+      pop.style.cssText = 'display:none;align-items:center;gap:6px;padding:6px 8px;margin:2px 0 6px;border:1px solid var(--line);border-radius:4px;';
+      pop.innerHTML = `<span style="font-size:9px;color:rgba(242,240,230,0.5);">Color</span>
+        <button type="button" class="capColorPreset" data-i="${i}" data-color="#ffffff" style="width:18px;height:18px;border-radius:3px;background:#ffffff;border:1px solid ${curColor==='#ffffff'?'var(--green-bright)':'rgba(255,255,255,0.25)'};cursor:pointer;padding:0;"></button>
+        <button type="button" class="capColorPreset" data-i="${i}" data-color="#050806" style="width:18px;height:18px;border-radius:3px;background:#050806;border:1px solid ${curColor==='#050806'?'var(--green-bright)':'rgba(255,255,255,0.25)'};cursor:pointer;padding:0;"></button>
+        <input type="text" class="capColorHex" data-i="${i}" value="${curColor}" placeholder="#ffffff" style="width:78px;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:10px;padding:4px 6px;">`;
+      wrap.appendChild(row);
+      wrap.appendChild(pop);
+      capList.appendChild(wrap);
     }
     capList.querySelectorAll('.capText').forEach(inp=>{
       inp.addEventListener('input', e=>{ captions[+inp.dataset.i] = inp.value; drawPreviewFrame(previewT); });
@@ -2090,7 +2079,7 @@
       inp.addEventListener('input', e=>{
         let v = parseFloat(inp.value);
         if(isNaN(v)) return;
-        v = Math.max(0.2, Math.min(5, v));
+        v = Math.max(0.2, Math.min(20, v));
         showDur[+inp.dataset.i] = v;
         refreshAll();
       });
@@ -2104,6 +2093,34 @@
           capPosOverride[i] = null; // back to following the shared position
         }
         updateCapHandle();
+        drawPreviewFrame(previewT);
+      });
+    });
+    capList.querySelectorAll('.capColorToggle').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const pop = capList.querySelector(`.cap-color-pop[data-i="${btn.dataset.i}"]`);
+        pop.style.display = pop.style.display==='none' ? 'flex' : 'none';
+      });
+    });
+    capList.querySelectorAll('.capColorPreset').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const i = +btn.dataset.i;
+        capTextColor[i] = btn.dataset.color;
+        const pop = btn.closest('.cap-color-pop');
+        pop.querySelectorAll('.capColorPreset').forEach(b=>{
+          b.style.borderColor = b.dataset.color===capTextColor[i] ? 'var(--green-bright)' : 'rgba(255,255,255,0.25)';
+        });
+        const hexEl = pop.querySelector('.capColorHex');
+        if(hexEl) hexEl.value = capTextColor[i];
+        drawPreviewFrame(previewT);
+      });
+    });
+    capList.querySelectorAll('.capColorHex').forEach(inp=>{
+      inp.addEventListener('change', ()=>{
+        let v = inp.value.trim();
+        if(!/^#/.test(v)) v = '#'+v;
+        if(!/^#[0-9a-fA-F]{6}$/.test(v)){ inp.value = capTextColor[+inp.dataset.i] || '#ffffff'; return; }
+        capTextColor[+inp.dataset.i] = v;
         drawPreviewFrame(previewT);
       });
     });
@@ -2211,9 +2228,11 @@
       cardTextValue: cardTextInput.value,
       hookCaptionTextValue: hookCapText.value,
       captions: captions.slice(),
+      capTextColor: { ...capTextColor },
       images: images.map(slot => slot ? slot.file : null), // File objects are Blobs — store directly
       audioFile: audioFile || null,
-      cardColorAuto, cardColorManual, cardColorAlpha
+      cardColorAuto, cardColorManual, cardColorAlpha,
+      cardBgMode, cardBgImageIdx, cardTextColor
     };
   }
 
@@ -2236,18 +2255,25 @@
     if(typeof t.hookWordByWord === 'boolean') hookWordByWord = t.hookWordByWord;
     if(typeof t.showWordByWord === 'boolean') showWordByWord = t.showWordByWord;
     if(Array.isArray(t.captions) && t.captions.length === N) captions = t.captions.slice();
+    capTextColor = (t.capTextColor && typeof t.capTextColor === 'object') ? { ...t.capTextColor } : {};
     if(typeof t.cardColorAuto === 'boolean') cardColorAuto = t.cardColorAuto;
     if(typeof t.cardColorManual === 'string') cardColorManual = t.cardColorManual;
     if(typeof t.cardColorAlpha === 'number') cardColorAlpha = t.cardColorAlpha;
+    if(typeof t.cardBgMode === 'string') cardBgMode = t.cardBgMode;
+    if(typeof t.cardBgImageIdx === 'number' || t.cardBgImageIdx === null) cardBgImageIdx = t.cardBgImageIdx;
+    if(typeof t.cardTextColor === 'string') cardTextColor = t.cardTextColor;
     cardColorAutoToggle.checked = cardColorAuto;
     cardAlphaRange.value = cardColorAlpha;
+    setCardBgMode(cardBgMode || 'color');
+    cardPicker.setFromHex(activeCardColorHex());
+    textPicker.setFromHex(cardTextColor);
 
     // reflect every value back into the actual UI controls, so what's on
     // screen always matches what was loaded
     hookDurRange.value = hookDur;
-    hookDurVal.textContent = hookDur.toFixed(2)+'s';
+    hookDurNum.value = hookDur.toFixed(2);
     cardDurRange.value = cardDur;
-    cardDurVal.textContent = cardDur.toFixed(1)+'s';
+    cardDurNum.value = cardDur.toFixed(2);
     buildCardPosOptions();
     cardPosSelect.value = cardPos;
     showDurRange.value = showDur[0] || 1;
@@ -2295,6 +2321,7 @@
     updateCapHandle();
     computeAutoCardColor();
     updateSwatch();
+    if(cardBgMode === 'image') renderCardBgThumbs();
 
     // restore audio (mp3 Blob) if the template has one
     if(t.audioFile){
@@ -2613,9 +2640,17 @@
   const voStatus = document.getElementById('voStatus');
   const voList = document.getElementById('voList');
   const voEmpty = document.getElementById('voEmpty');
+  const voKeyStatus = document.getElementById('voKeyStatus');
+  const voPlayer = document.getElementById('voPlayer');
   const VO_GAP_MS = 150000; // 2.5 minutes between Groq requests, per-request
 
-  openVoiceLibBtn.addEventListener('click', ()=>{ voiceLibModalOverlay.classList.add('on'); renderVoiceList(); });
+  function renderVoKeyStatus(){
+    const has = !!groqKeyInput.value.trim();
+    voKeyStatus.innerHTML = has
+      ? `<span style="color:var(--green-bright);">✓ Groq API key saved</span> — same key as the audio-sync panel, used here for transcription too.`
+      : `<span style="color:#e0866a;">⚠ No Groq API key yet</span> — add it above in "Add MP3 + sync captions" once; it's saved in this browser and used everywhere, including here.`;
+  }
+  openVoiceLibBtn.addEventListener('click', ()=>{ voiceLibModalOverlay.classList.add('on'); renderVoKeyStatus(); renderVoiceList(); });
   voiceLibModalClose.addEventListener('click', ()=>{ voiceLibModalOverlay.classList.remove('on'); });
   voiceLibModalOverlay.addEventListener('click', e=>{ if(e.target === voiceLibModalOverlay) voiceLibModalOverlay.classList.remove('on'); });
 
@@ -2671,30 +2706,35 @@
     if(!pending.length){ setVoStatus('Nothing left to transcribe.'); return; }
 
     voTranscribeAllBtn.disabled = true;
-    for(let i=0;i<pending.length;i++){
-      const v = pending[i];
-      setVoStatus(`Transcribing ${i+1}/${pending.length} — "${v.name}"…`);
-      v.status = 'transcribing';
-      await idbPut('voiceovers', v, v.id);
-      await renderVoiceList();
-      try{
-        const text = await transcribeAudioWithGroq(v.blob, apiKey);
-        v.transcript = text;
-        v.status = 'done';
-        await idbPut('voiceovers', v, v.id);
-        setVoStatus(`Transcribed "${v.name}".`);
-      } catch(err){
-        console.error('transcription failed', err);
-        v.status = 'error';
-        v.error = err.message;
-        await idbPut('voiceovers', v, v.id);
-        setVoStatus(`Failed on "${v.name}": ${err.message}`, true);
+    try{
+      for(let i=0;i<pending.length;i++){
+        const v = pending[i];
+        setVoStatus(`Transcribing ${i+1}/${pending.length} — "${v.name}"…`);
+        v.status = 'transcribing';
+        await idbPut('voiceovers', v);
+        await renderVoiceList();
+        try{
+          const text = await transcribeAudioWithGroq(v.blob, apiKey);
+          v.transcript = text;
+          v.status = 'done';
+          await idbPut('voiceovers', v);
+          setVoStatus(`Transcribed "${v.name}".`);
+        } catch(err){
+          console.error('transcription failed', err);
+          v.status = 'error';
+          v.error = err.message;
+          await idbPut('voiceovers', v);
+          setVoStatus(`Failed on "${v.name}": ${err.message}`, true);
+        }
+        await renderVoiceList();
+        if(i < pending.length-1){
+          setVoStatus(`Waiting 2.5 minutes before the next MP3 (${i+1}/${pending.length} done)…`);
+          await sleep(VO_GAP_MS);
+        }
       }
-      await renderVoiceList();
-      if(i < pending.length-1){
-        setVoStatus(`Waiting 2.5 minutes before the next MP3 (${i+1}/${pending.length} done)…`);
-        await sleep(VO_GAP_MS);
-      }
+    } catch(err){
+      console.error('transcription loop failed', err);
+      setVoStatus(`Stopped: ${err.message}`, true);
     }
     voTranscribeAllBtn.disabled = false;
     setVoStatus('Transcription complete — matching against gallery videos…');
@@ -2788,11 +2828,11 @@
       claimedVo.add(p.vo.id); claimedVid.add(p.vid.id);
       p.vo.matchedVideoId = p.vid.id;
       p.vo.confidence = p.confidence;
-      await idbPut('voiceovers', p.vo, p.vo.id);
+      await idbPut('voiceovers', p.vo);
       p.vid.template.audioFile = p.vo.blob;
       p.vid.template.audioFileName = p.vo.name;
       p.vid.voiceoverId = p.vo.id;
-      await idbPut('videos', p.vid, p.vid.id);
+      await idbPut('videos', p.vid);
     }
     await refreshAllGalleries();
     await renderVoiceList();
@@ -2813,7 +2853,7 @@
       const prev = await idbGet('videos', vo.matchedVideoId);
       if(prev && prev.voiceoverId === vo.id){
         prev.template.audioFile = null; prev.template.audioFileName = null; prev.voiceoverId = null;
-        await idbPut('videos', prev, prev.id);
+        await idbPut('videos', prev);
       }
     }
     if(videoId){
@@ -2822,19 +2862,19 @@
         // if that video already had a different voiceover, detach it back to the pool
         if(vid.voiceoverId && vid.voiceoverId !== vo.id){
           const otherVo = await idbGet('voiceovers', vid.voiceoverId);
-          if(otherVo){ otherVo.matchedVideoId = null; otherVo.confidence = 0; await idbPut('voiceovers', otherVo, otherVo.id); }
+          if(otherVo){ otherVo.matchedVideoId = null; otherVo.confidence = 0; await idbPut('voiceovers', otherVo); }
         }
         vid.template.audioFile = vo.blob;
         vid.template.audioFileName = vo.name;
         vid.voiceoverId = vo.id;
-        await idbPut('videos', vid, vid.id);
+        await idbPut('videos', vid);
         vo.matchedVideoId = videoId;
       }
     } else {
       vo.matchedVideoId = null;
       vo.confidence = 0;
     }
-    await idbPut('voiceovers', vo, vo.id);
+    await idbPut('voiceovers', vo);
     await refreshAllGalleries();
     await renderVoiceList();
   }
@@ -2853,19 +2893,25 @@
       const statusLabel = { pending:'Not transcribed', transcribing:'Transcribing…', done:'Transcribed', error:'Failed' }[v.status] || v.status;
       const statusColor = v.status==='error' ? '#e0866a' : v.status==='done' ? 'var(--green-bright)' : 'rgba(242,240,230,0.55)';
       const matchedVideo = v.matchedVideoId ? videos.find(vid=>vid.id===v.matchedVideoId) : null;
+      const matchedCaptions = matchedVideo && matchedVideo.template && Array.isArray(matchedVideo.template.captions)
+        ? matchedVideo.template.captions.filter(c=>c && c.trim()).join(' · ')
+        : '';
       const options = ['<option value="">— none —</option>']
         .concat(videos.map(vid => `<option value="${vid.id}" ${v.matchedVideoId===vid.id?'selected':''}>${vid.name}${vid.voiceoverId && vid.voiceoverId!==v.id ? ' (has voice)' : ''}</option>`));
       row.innerHTML = `
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+          <button type="button" class="align-btn" data-voplay="${v.id}" title="Play this MP3" style="padding:6px 9px;flex:0 0 auto;">▶</button>
           <div style="font-family:var(--mono);font-size:11px;color:var(--paper);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v.name}</div>
           <div style="font-size:9.5px;color:${statusColor};white-space:nowrap;">${statusLabel}</div>
         </div>
         ${v.transcript ? `<div style="font-size:9.5px;color:rgba(242,240,230,0.6);margin-top:6px;line-height:1.5;max-height:54px;overflow:hidden;">${v.transcript}</div>` : ''}
+        ${v.status==='error' && v.error ? `<div style="font-size:9.5px;color:#e0866a;margin-top:6px;">${v.error}</div>` : ''}
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
           <span style="font-size:9.5px;color:rgba(242,240,230,0.55);white-space:nowrap;">Match:</span>
           <select data-assign="${v.id}" style="flex:1;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);font-size:10.5px;">${options.join('')}</select>
           ${matchedVideo ? `<span style="font-size:9.5px;color:${v.confidence>=0.6?'var(--green-bright)':'#e0a84a'};white-space:nowrap;">${Math.round(v.confidence*100)}%</span>` : ''}
         </div>
+        ${matchedCaptions ? `<div style="font-size:9px;color:rgba(242,240,230,0.4);margin-top:6px;line-height:1.4;" title="Captions on the matched video — compare against the transcript above to sanity-check the match">Video captions: ${matchedCaptions}</div>` : ''}
       `;
       voList.appendChild(row);
     }
@@ -2876,7 +2922,29 @@
         assignVoiceoverToVideo(voId, videoId);
       });
     });
+    voList.querySelectorAll('[data-voplay]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = +btn.dataset.voplay;
+        const v = await idbGet('voiceovers', id);
+        if(!v || !v.blob) return;
+        // toggle: clicking the currently-playing row's button pauses it
+        if(voPlayer.dataset.playingId === String(id) && !voPlayer.paused){
+          voPlayer.pause();
+          btn.textContent = '▶';
+          return;
+        }
+        voList.querySelectorAll('[data-voplay]').forEach(b=>b.textContent = '▶');
+        if(voPlayer.src) URL.revokeObjectURL(voPlayer.src);
+        voPlayer.src = URL.createObjectURL(v.blob);
+        voPlayer.dataset.playingId = String(id);
+        voPlayer.play().catch(()=>{});
+        btn.textContent = '⏸';
+      });
+    });
   }
+  voPlayer.addEventListener('ended', ()=>{
+    voList.querySelectorAll('[data-voplay]').forEach(b=>b.textContent = '▶');
+  });
   renderVoiceList();
 
   function closePlayer(){
@@ -2996,25 +3064,25 @@
       ctx.fillRect(0, Math.max(0,y-bandH), W, bandH*2);
 
       if(showWordByWord){
-        drawWordByWord(caption, localT||0, dur, capFontSize*SIZE_SCALE, x, y, align);
+        drawWordByWord(caption, localT||0, dur, capFontSize*SIZE_SCALE, x, y, align, capTextColor[idx] || '#ffffff');
       } else {
         let xClamped = x;
         if(align==='left') xClamped = Math.max(48, x);
         if(align==='right') xClamped = Math.min(W-48, x);
-        drawOneLine(caption, xClamped, y, W*0.86, capFontSize*SIZE_SCALE, align);
+        drawOneLine(caption, xClamped, y, W*0.86, capFontSize*SIZE_SCALE, align, capTextColor[idx] || '#ffffff');
       }
     }
   }
 
   // Forces caption onto exactly one line — shrinks font instead of wrapping.
-  function drawOneLine(text, x, y, maxWidth, fontSize, align){
+  function drawOneLine(text, x, y, maxWidth, fontSize, align, fillColor){
     let fs = fontSize;
     ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
     while(ctx.measureText(text).width > maxWidth && fs > 18){
       fs -= 2;
       ctx.font = `800 ${fs}px 'League Spartan', Archivo, Arial, sans-serif`;
     }
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = fillColor || '#ffffff';
     ctx.textAlign = align;
     ctx.textBaseline = 'middle';
     ctx.fillText(text, x, y);
@@ -3093,6 +3161,17 @@
     progFill.style.width = (ratio*100)+'%';
     playhead.style.left = (ratio*100)+'%';
   }
+
+  fullscreenBtn.addEventListener('click', async ()=>{
+    try{
+      if(!document.fullscreenElement){
+        await (frameEl.requestFullscreen ? frameEl.requestFullscreen() : frameEl.webkitRequestFullscreen());
+        if(loadedCount()>=N && !playing) playBtn.click(); // start playback automatically so it's a live look, not a static frame
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch(err){ console.error('fullscreen failed', err); }
+  });
 
   playBtn.addEventListener('click', ()=>{
     if(loadedCount()<N) return;
