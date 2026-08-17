@@ -695,6 +695,7 @@
   <button type="button" id="newVideoBtn" class="qb-btn">＋ New video</button>
   <button type="button" id="openGalleryBtn" class="qb-btn qb-btn-alt">▤ Full gallery<span id="qbGalleryCount" class="qb-count" style="display:none;">0</span></button>
   <button type="button" id="openVoiceLibBtn" class="qb-btn qb-btn-alt">🎙 Voice library<span id="qbVoiceCount" class="qb-count" style="display:none;">0</span></button>
+  <button type="button" id="openMusicLibBtn" class="qb-btn qb-btn-alt">🎵 Music library<span id="qbMusicCount" class="qb-count" style="display:none;">0</span></button>
 </div>
 
 <div class="main">
@@ -931,6 +932,21 @@
       </div>
     </div>
 
+    <div class="field">
+      <label>Background music (optional)</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="bgMusicSelect" style="flex:1;background:#0d0f0c;color:var(--paper);border:1px solid var(--line);border-radius:3px;padding:8px;font-family:var(--mono);font-size:11px;">
+          <option value="">— none —</option>
+        </select>
+        <button type="button" class="align-btn" id="bgMusicPreviewBtn" style="padding:8px 10px;">▶</button>
+      </div>
+      <div style="margin-top:8px;">
+        <label style="font-size:9.5px;color:rgba(242,240,230,0.55);">Music volume: <span id="bgMusicVolVal">25%</span></label>
+        <input type="range" id="bgMusicVolRange" min="0" max="100" value="25" style="width:100%;">
+      </div>
+      <div class="ds" style="margin-top:4px;">loops under the full video, mixed under the voice-over · pick tracks from 🎵 Music library above</div>
+    </div>
+
     <div style="display:flex;flex-direction:column;gap:10px;">
       <button class="generate" id="genBtn" disabled>Load 10 images first</button>
       <div class="genbar" id="genBar"><div class="f" id="genFill"></div></div>
@@ -984,13 +1000,34 @@
       <div class="ds">any number at once · saved immediately</div>
     </label>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-      <button type="button" id="voTranscribeAllBtn" class="align-btn" style="flex:1;">▶ Run transcription (2.5 min apart)</button>
+      <button type="button" id="voTranscribeAllBtn" class="align-btn" style="flex:1;">▶ Run transcription (50s apart)</button>
       <button type="button" id="voRematchBtn" class="align-btn">Re-match all</button>
     </div>
     <audio id="voPlayer" style="display:none;"></audio>
     <div id="voStatus" style="font-size:9.5px;color:var(--green-bright);margin-bottom:10px;min-height:12px;"></div>
     <div id="voList" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div id="voEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No voice-overs uploaded yet.</div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="musicLibModalOverlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Background music library</h2>
+      <button type="button" class="modal-close" id="musicLibModalClose">✕</button>
+    </div>
+    <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
+      Upload every background track once, here. Then pick one per video in the "Background music" field in the editor — it loops under the full video and mixes under any voice-over when you export.
+    </div>
+    <label for="musicMultiInput" class="drop" id="musicDropZone" style="padding:16px;margin-bottom:10px;">
+      <input type="file" id="musicMultiInput" accept="audio/mp3,audio/mpeg,audio/*" multiple>
+      <div class="dt">Drop or select music files</div>
+      <div class="ds">any number at once · saved immediately</div>
+    </label>
+    <audio id="musicPlayer" style="display:none;"></audio>
+    <div id="musicStatus" style="font-size:9.5px;color:var(--green-bright);margin-bottom:10px;min-height:12px;"></div>
+    <div id="musicList" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div id="musicEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No background music uploaded yet.</div>
   </div>
 </div>
 
@@ -1032,6 +1069,11 @@
   let hookWordByWord = false;
   let showWordByWord = false;
   let audioFile = null;
+  let bgMusicFile = null;            // selected background-music Blob (from the music library)
+  let bgMusicId = null;              // id of the selected track in the 'music' store
+  let bgMusicVolume = 0.25;          // 0..1, mixed under the voice-over on export
+  let currentEditingVideoId = null;  // id of the gallery video currently open in the editor, if any
+  let currentEditorVoiceoverId = null; // voiceover attached to an unsaved editor session
   let cardColorAuto = true;          // when true, card color is derived from loaded images
   let cardColorManual = '#0e3d24';   // last manually picked color (hex)
   let cardColorAlpha = 0.9;          // alpha applied to whichever color is active
@@ -1133,6 +1175,10 @@
   const audioDT = document.getElementById('audioDT');
   const audioDS = document.getElementById('audioDS');
   const audioRemove = document.getElementById('audioRemove');
+  const bgMusicSelect = document.getElementById('bgMusicSelect');
+  const bgMusicPreviewBtn = document.getElementById('bgMusicPreviewBtn');
+  const bgMusicVolRange = document.getElementById('bgMusicVolRange');
+  const bgMusicVolVal = document.getElementById('bgMusicVolVal');
   const tmplSaveBtn = document.getElementById('tmplSaveBtn');
   const tmplRestoreBtn = document.getElementById('tmplRestoreBtn');
   const tmplPickerWrap = document.getElementById('tmplPickerWrap');
@@ -1566,6 +1612,16 @@
     syncStatus.textContent = '';
     if(previewAudioUrl){ URL.revokeObjectURL(previewAudioUrl); previewAudioUrl = null; }
     previewAudio.removeAttribute('src'); previewAudio.load();
+    if(currentEditorVoiceoverId){
+      const clearedId = currentEditorVoiceoverId;
+      currentEditorVoiceoverId = null;
+      idbGet('voiceovers', clearedId).then(vo=>{
+        if(vo && vo.matchedVideoId === CURRENT_EDITOR_KEY){
+          vo.matchedVideoId = null; vo.confidence = 0;
+          return idbPut('voiceovers', vo).then(()=> renderVoiceList().catch(()=>{}));
+        }
+      }).catch(()=>{});
+    }
   });
 
   // ---------- Whisper word-timestamp sync ----------
@@ -2145,7 +2201,7 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 2;
+  const IDB_VERSION = 3;
   function openDB(){
     return new Promise((resolve,reject)=>{
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
@@ -2154,6 +2210,7 @@
         if(!db.objectStoreNames.contains('templates')) db.createObjectStore('templates');
         if(!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath:'id', autoIncrement:true });
         if(!db.objectStoreNames.contains('voiceovers')) db.createObjectStore('voiceovers', { keyPath:'id', autoIncrement:true });
+        if(!db.objectStoreNames.contains('music')) db.createObjectStore('music', { keyPath:'id', autoIncrement:true });
       };
       req.onsuccess = ()=>resolve(req.result);
       req.onerror = ()=>reject(req.error);
@@ -2231,6 +2288,10 @@
       capTextColor: { ...capTextColor },
       images: images.map(slot => slot ? slot.file : null), // File objects are Blobs — store directly
       audioFile: audioFile || null,
+      bgMusicFile: bgMusicFile || null,
+      bgMusicFileName: bgMusicFile ? (bgMusicFile.name || null) : null,
+      bgMusicId: bgMusicId || null,
+      bgMusicVolume,
       cardColorAuto, cardColorManual, cardColorAlpha,
       cardBgMode, cardBgImageIdx, cardTextColor
     };
@@ -2343,6 +2404,19 @@
       previewAudio.removeAttribute('src'); previewAudio.load();
     }
 
+    // restore background music selection (blob comes from the music library store)
+    bgMusicVolume = typeof t.bgMusicVolume === 'number' ? t.bgMusicVolume : 0.25;
+    bgMusicVolRange.value = Math.round(bgMusicVolume*100);
+    bgMusicVolVal.textContent = Math.round(bgMusicVolume*100) + '%';
+    if(t.bgMusicFile){
+      bgMusicFile = t.bgMusicFile;
+      bgMusicId = typeof t.bgMusicId === 'number' ? t.bgMusicId : null;
+    } else {
+      bgMusicFile = null;
+      bgMusicId = null;
+    }
+    await renderBgMusicOptions();
+
     refreshAll();
   }
 
@@ -2402,6 +2476,8 @@
       const t = await idbGet('templates', name);
       if(!t){ showTmplStatus('That template was not found.', true); }
       else{
+        currentEditingVideoId = null;
+        currentEditorVoiceoverId = null;
         await applyTemplate(t);
         await saveTemplateToStorage();
         showTmplStatus(`Loaded "${name}" — images, captions, everything.`);
@@ -2422,7 +2498,8 @@
     const packed = {
       ...t,
       images: await Promise.all(t.images.map(file=> file ? blobToDataURL(file) : null)),
-      audioFile: t.audioFile ? await blobToDataURL(t.audioFile) : null
+      audioFile: t.audioFile ? await blobToDataURL(t.audioFile) : null,
+      bgMusicFile: t.bgMusicFile ? await blobToDataURL(t.bgMusicFile) : null
     };
     const blob = new Blob([JSON.stringify(packed)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
@@ -2463,8 +2540,12 @@
         images: Array.isArray(raw.images)
           ? raw.images.map((d,i)=> d ? new File([dataURLToBlob(d)], `image-${i+1}.jpg`, {type: dataURLToBlob(d).type}) : null)
           : new Array(N).fill(null),
-        audioFile: raw.audioFile ? new File([dataURLToBlob(raw.audioFile)], 'audio.mp3', {type: dataURLToBlob(raw.audioFile).type}) : null
+        audioFile: raw.audioFile ? new File([dataURLToBlob(raw.audioFile)], 'audio.mp3', {type: dataURLToBlob(raw.audioFile).type}) : null,
+        bgMusicFile: raw.bgMusicFile ? new File([dataURLToBlob(raw.bgMusicFile)], raw.bgMusicFileName || 'music.mp3', {type: dataURLToBlob(raw.bgMusicFile).type}) : null,
+        bgMusicId: null // imported music isn't in this browser's music library yet — kept as an attached file only
       };
+      currentEditingVideoId = null;
+      currentEditorVoiceoverId = null;
       await applyTemplate(unpacked);
       await saveTemplateToStorage();
       showTmplStatus('Template imported — images, captions, everything loaded.');
@@ -2503,9 +2584,22 @@
   async function saveVideoToGallery(blob){
     const name = await nextVideoName();
     const template = await collectTemplate().catch(()=>null);
-    const id = await idbPut('videos', { name, blob, createdAt: Date.now(), template });
+    const id = await idbPut('videos', { name, blob, createdAt: Date.now(), template, voiceoverId: currentEditorVoiceoverId || null });
+    // if a voiceover was attached while this video was still unsaved (via the
+    // "current editor" option in the Voice-over library), point it at the
+    // now-real video id instead of the placeholder session marker
+    if(currentEditorVoiceoverId){
+      const vo = await idbGet('voiceovers', currentEditorVoiceoverId);
+      if(vo && vo.matchedVideoId === CURRENT_EDITOR_KEY){
+        vo.matchedVideoId = id;
+        await idbPut('voiceovers', vo);
+      }
+    }
+    currentEditingVideoId = id;
+    currentEditorVoiceoverId = null;
     await refreshAllGalleries();
     await attemptAutoMatchVoiceovers().catch(err=>console.error('voiceover auto-match failed', err));
+    await renderVoiceList().catch(()=>{});
     return id;
   }
   function dayKey(ts){
@@ -2548,11 +2642,12 @@
         row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;flex-wrap:wrap;';
         const dt = new Date(v.createdAt);
         const hasVoice = !!(v.template && v.template.audioFile);
+        const hasMusic = !!(v.template && v.template.bgMusicFile);
         row.innerHTML = `
           <div data-edit="${v.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;flex:1;min-width:0;" title="Open in editor">
             <video src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="metadata"></video>
             <div style="flex:1;min-width:0;">
-              <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}${hasVoice ? ' <span style="color:var(--green-bright);" title="Voice-over attached">🔊</span>' : ''}</div>
+              <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}${hasVoice ? ' <span style="color:var(--green-bright);" title="Voice-over attached">🔊</span>' : ''}${hasMusic ? ' <span style="color:var(--green-bright);" title="Background music attached">🎵</span>' : ''}</div>
               <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · tap to edit</div>
             </div>
           </div>
@@ -2589,6 +2684,8 @@
           return;
         }
         try{
+          currentEditingVideoId = id;
+          currentEditorVoiceoverId = null;
           await applyTemplate(v.template);
           await saveTemplateToStorage();
           galleryModalOverlay.classList.remove('on');
@@ -2642,7 +2739,8 @@
   const voEmpty = document.getElementById('voEmpty');
   const voKeyStatus = document.getElementById('voKeyStatus');
   const voPlayer = document.getElementById('voPlayer');
-  const VO_GAP_MS = 150000; // 2.5 minutes between Groq requests, per-request
+  const VO_GAP_MS = 50000; // 50 seconds between Groq requests, per-request
+  const CURRENT_EDITOR_KEY = '__current_editor__'; // sentinel "video" id meaning "whatever is open in the editor right now"
 
   function renderVoKeyStatus(){
     const has = !!groqKeyInput.value.trim();
@@ -2697,19 +2795,26 @@
   }
 
   function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+  const VO_RESUME_FLAG = 'voFetchWasRunning';
 
-  voTranscribeAllBtn.addEventListener('click', async ()=>{
+  // Fetching "again" only ever works through this queue, and this queue
+  // always recomputes `pending` from what's actually saved in IndexedDB —
+  // so anything already status:'done' is skipped automatically, every time,
+  // whether this is a fresh click or an auto-resume after the tab reopened.
+  async function runVoTranscribeQueue(){
     const apiKey = groqKeyInput.value.trim();
     if(!apiKey){ setVoStatus('Add your Groq API key in the audio panel first.', true); return; }
-    const all = await idbGetAll('voiceovers');
+    const all = (await idbGetAll('voiceovers')).sort((a,b)=> a.id - b.id);
     const pending = all.filter(v => v.status !== 'done');
-    if(!pending.length){ setVoStatus('Nothing left to transcribe.'); return; }
+    if(!pending.length){ setVoStatus('Nothing left to transcribe.'); localStorage.removeItem(VO_RESUME_FLAG); return; }
 
+    localStorage.setItem(VO_RESUME_FLAG, '1'); // remembered across a closed laptop/tab so it can auto-resume
     voTranscribeAllBtn.disabled = true;
     try{
       for(let i=0;i<pending.length;i++){
         const v = pending[i];
-        setVoStatus(`Transcribing ${i+1}/${pending.length} — "${v.name}"…`);
+        const posInAll = all.findIndex(x=>x.id===v.id) + 1;
+        setVoStatus(`Transcribing ${posInAll}/${all.length} — "${v.name}"…`);
         v.status = 'transcribing';
         await idbPut('voiceovers', v);
         await renderVoiceList();
@@ -2717,8 +2822,9 @@
           const text = await transcribeAudioWithGroq(v.blob, apiKey);
           v.transcript = text;
           v.status = 'done';
+          v.error = null;
           await idbPut('voiceovers', v);
-          setVoStatus(`Transcribed "${v.name}".`);
+          setVoStatus(`Transcribed "${v.name}" (${posInAll}/${all.length}).`);
         } catch(err){
           console.error('transcription failed', err);
           v.status = 'error';
@@ -2728,7 +2834,7 @@
         }
         await renderVoiceList();
         if(i < pending.length-1){
-          setVoStatus(`Waiting 2.5 minutes before the next MP3 (${i+1}/${pending.length} done)…`);
+          setVoStatus(`Waiting 50s before the next MP3 (${posInAll}/${all.length} done)…`);
           await sleep(VO_GAP_MS);
         }
       }
@@ -2739,8 +2845,36 @@
     voTranscribeAllBtn.disabled = false;
     setVoStatus('Transcription complete — matching against gallery videos…');
     await attemptAutoMatchVoiceovers();
+    const stillPending = (await idbGetAll('voiceovers')).some(v => v.status !== 'done');
+    if(!stillPending) localStorage.removeItem(VO_RESUME_FLAG);
     setVoStatus('Done — review matches below.');
-  });
+  }
+  voTranscribeAllBtn.addEventListener('click', runVoTranscribeQueue);
+
+  // retry a single failed file without waiting or re-running the whole queue
+  async function retryVoiceover(id){
+    const apiKey = groqKeyInput.value.trim();
+    if(!apiKey){ setVoStatus('Add your Groq API key in the audio panel first.', true); return; }
+    const v = await idbGet('voiceovers', id);
+    if(!v) return;
+    v.status = 'transcribing'; v.error = null;
+    await idbPut('voiceovers', v);
+    await renderVoiceList();
+    setVoStatus(`Retrying "${v.name}"…`);
+    try{
+      const text = await transcribeAudioWithGroq(v.blob, apiKey);
+      v.transcript = text; v.status = 'done'; v.error = null;
+      await idbPut('voiceovers', v);
+      setVoStatus(`Transcribed "${v.name}".`);
+      await attemptAutoMatchVoiceovers();
+    } catch(err){
+      console.error('retry failed', err);
+      v.status = 'error'; v.error = err.message;
+      await idbPut('voiceovers', v);
+      setVoStatus(`Still failing on "${v.name}": ${err.message}`, true);
+    }
+    await renderVoiceList();
+  }
 
   // ---------- matching: transcript <-> gallery video captions ----------
   const STOPWORDS = new Set(['the','a','an','to','of','and','or','is','in','on','for','with','my','your','this','that','it','at','by','you','get','free','guide','watch','comment','i','me','we']);
@@ -2844,19 +2978,45 @@
     setVoStatus('Matching pass complete.');
   });
 
-  // manually attach a voiceover to a specific gallery video (or detach)
+  // manually attach a voiceover to a specific gallery video, to the video
+  // currently open in the editor (even if unsaved), or detach it entirely
   async function assignVoiceoverToVideo(voId, videoId){
     const vo = await idbGet('voiceovers', voId);
     if(!vo) return;
-    // free up whatever video it was previously attached to
-    if(vo.matchedVideoId){
+    // free up whatever it was previously attached to
+    if(vo.matchedVideoId === CURRENT_EDITOR_KEY){
+      if(currentEditorVoiceoverId === vo.id) currentEditorVoiceoverId = null;
+    } else if(vo.matchedVideoId){
       const prev = await idbGet('videos', vo.matchedVideoId);
       if(prev && prev.voiceoverId === vo.id){
         prev.template.audioFile = null; prev.template.audioFileName = null; prev.voiceoverId = null;
         await idbPut('videos', prev);
       }
     }
-    if(videoId){
+
+    if(videoId === CURRENT_EDITOR_KEY){
+      // the video currently open in the editor — including one that hasn't
+      // been exported/saved yet, so it's still treated like an existing video
+      applyVoiceoverToEditor(vo);
+      currentEditorVoiceoverId = vo.id;
+      vo.matchedVideoId = CURRENT_EDITOR_KEY;
+      vo.confidence = 1;
+      // if this editor session is actually reopened from a saved gallery
+      // video, keep that video record's own voiceoverId in sync too
+      if(currentEditingVideoId){
+        const vid = await idbGet('videos', currentEditingVideoId);
+        if(vid){
+          if(vid.voiceoverId && vid.voiceoverId !== vo.id){
+            const otherVo = await idbGet('voiceovers', vid.voiceoverId);
+            if(otherVo){ otherVo.matchedVideoId = null; otherVo.confidence = 0; await idbPut('voiceovers', otherVo); }
+          }
+          vid.template.audioFile = vo.blob;
+          vid.template.audioFileName = vo.name;
+          vid.voiceoverId = vo.id;
+          await idbPut('videos', vid);
+        }
+      }
+    } else if(videoId){
       const vid = await idbGet('videos', videoId);
       if(vid){
         // if that video already had a different voiceover, detach it back to the pool
@@ -2869,6 +3029,8 @@
         vid.voiceoverId = vo.id;
         await idbPut('videos', vid);
         vo.matchedVideoId = videoId;
+        // if this saved video is also the one open in the editor right now, reflect it live
+        if(currentEditingVideoId === videoId) applyVoiceoverToEditor(vo);
       }
     } else {
       vo.matchedVideoId = null;
@@ -2879,6 +3041,28 @@
     await renderVoiceList();
   }
 
+  // attaches a voiceover blob straight into the open editor — same effect as
+  // manually dropping it into "Add MP3", just sourced from the library
+  function applyVoiceoverToEditor(vo){
+    audioFile = vo.blob;
+    audioDT.textContent = vo.name || (vo.blob && vo.blob.name) || 'Audio track';
+    audioDS.textContent = 'Ready — mixed into the exported video (from Voice-over library)';
+    audioRemove.style.display = 'block';
+    if(previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
+    previewAudioUrl = URL.createObjectURL(vo.blob);
+    previewAudio.src = previewAudioUrl;
+    whisperBox.style.display = 'block';
+    saveTemplateToStorage();
+  }
+
+  async function getCurrentEditorMatchedVoId(){
+    if(currentEditingVideoId){
+      const vid = await idbGet('videos', currentEditingVideoId);
+      return vid ? (vid.voiceoverId || null) : null;
+    }
+    return currentEditorVoiceoverId;
+  }
+
   async function renderVoiceList(){
     const all = (await idbGetAll('voiceovers')).sort((a,b)=> b.createdAt - a.createdAt);
     const videos = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
@@ -2886,30 +3070,45 @@
     if(all.length){ qbVoiceCount.textContent = all.length; qbVoiceCount.style.display = 'inline-block'; }
     else qbVoiceCount.style.display = 'none';
 
+    const matchedEditorVoId = await getCurrentEditorMatchedVoId();
+    const editingVideo = currentEditingVideoId ? videos.find(vd=>vd.id===currentEditingVideoId) : null;
+    const currentEditorLabel = editingVideo
+      ? `${editingVideo.name} (currently editing)`
+      : '▶ Currently editing (not saved yet)';
+    // the video open in the editor also exists as its own saved row further down
+    // the list once it has an id — don't show it twice
+    const otherVideos = videos.filter(vid => vid.id !== currentEditingVideoId);
+
     voList.innerHTML = '';
     for(const v of all){
       const row = document.createElement('div');
       row.style.cssText = 'border:1px solid var(--line);border-radius:4px;padding:10px;';
       const statusLabel = { pending:'Not transcribed', transcribing:'Transcribing…', done:'Transcribed', error:'Failed' }[v.status] || v.status;
       const statusColor = v.status==='error' ? '#e0866a' : v.status==='done' ? 'var(--green-bright)' : 'rgba(242,240,230,0.55)';
-      const matchedVideo = v.matchedVideoId ? videos.find(vid=>vid.id===v.matchedVideoId) : null;
-      const matchedCaptions = matchedVideo && matchedVideo.template && Array.isArray(matchedVideo.template.captions)
-        ? matchedVideo.template.captions.filter(c=>c && c.trim()).join(' · ')
-        : '';
-      const options = ['<option value="">— none —</option>']
-        .concat(videos.map(vid => `<option value="${vid.id}" ${v.matchedVideoId===vid.id?'selected':''}>${vid.name}${vid.voiceoverId && vid.voiceoverId!==v.id ? ' (has voice)' : ''}</option>`));
+      const isCurrentEditorMatch = v.matchedVideoId === CURRENT_EDITOR_KEY;
+      const matchedVideo = (!isCurrentEditorMatch && v.matchedVideoId) ? videos.find(vid=>vid.id===v.matchedVideoId) : null;
+      const matchedCaptions = isCurrentEditorMatch
+        ? captions.filter(c=>c && c.trim()).join(' · ')
+        : (matchedVideo && matchedVideo.template && Array.isArray(matchedVideo.template.captions)
+          ? matchedVideo.template.captions.filter(c=>c && c.trim()).join(' · ')
+          : '');
+      const options = ['<option value="">— none —</option>',
+          `<option value="${CURRENT_EDITOR_KEY}" ${matchedEditorVoId===v.id?'selected':''}>${currentEditorLabel}</option>`
+        ]
+        .concat(otherVideos.map(vid => `<option value="${vid.id}" ${v.matchedVideoId===vid.id?'selected':''}>${vid.name}${vid.voiceoverId && vid.voiceoverId!==v.id ? ' (has voice)' : ''}</option>`));
       row.innerHTML = `
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
           <button type="button" class="align-btn" data-voplay="${v.id}" title="Play this MP3" style="padding:6px 9px;flex:0 0 auto;">▶</button>
           <div style="font-family:var(--mono);font-size:11px;color:var(--paper);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v.name}</div>
           <div style="font-size:9.5px;color:${statusColor};white-space:nowrap;">${statusLabel}</div>
+          ${v.status==='error' ? `<button type="button" class="align-btn" data-retry="${v.id}" title="Retry this file" style="padding:6px 9px;flex:0 0 auto;">↻ Retry</button>` : ''}
         </div>
         ${v.transcript ? `<div style="font-size:9.5px;color:rgba(242,240,230,0.6);margin-top:6px;line-height:1.5;max-height:54px;overflow:hidden;">${v.transcript}</div>` : ''}
         ${v.status==='error' && v.error ? `<div style="font-size:9.5px;color:#e0866a;margin-top:6px;">${v.error}</div>` : ''}
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-          <span style="font-size:9.5px;color:rgba(242,240,230,0.55);white-space:nowrap;">Match:</span>
+          <span style="font-size:9.5px;color:rgba(242,240,230,0.55);white-space:nowrap;">Select video:</span>
           <select data-assign="${v.id}" style="flex:1;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);font-size:10.5px;">${options.join('')}</select>
-          ${matchedVideo ? `<span style="font-size:9.5px;color:${v.confidence>=0.6?'var(--green-bright)':'#e0a84a'};white-space:nowrap;">${Math.round(v.confidence*100)}%</span>` : ''}
+          ${isCurrentEditorMatch ? `<span style="font-size:9.5px;color:var(--green-bright);white-space:nowrap;">✓ in editor</span>` : matchedVideo ? `<span style="font-size:9.5px;color:${v.confidence>=0.6?'var(--green-bright)':'#e0a84a'};white-space:nowrap;">${Math.round(v.confidence*100)}%</span>` : ''}
         </div>
         ${matchedCaptions ? `<div style="font-size:9px;color:rgba(242,240,230,0.4);margin-top:6px;line-height:1.4;" title="Captions on the matched video — compare against the transcript above to sanity-check the match">Video captions: ${matchedCaptions}</div>` : ''}
       `;
@@ -2918,9 +3117,13 @@
     voList.querySelectorAll('[data-assign]').forEach(sel=>{
       sel.addEventListener('change', ()=>{
         const voId = +sel.dataset.assign;
-        const videoId = sel.value ? +sel.value : null;
+        const raw = sel.value;
+        const videoId = !raw ? null : raw === CURRENT_EDITOR_KEY ? CURRENT_EDITOR_KEY : +raw;
         assignVoiceoverToVideo(voId, videoId);
       });
+    });
+    voList.querySelectorAll('[data-retry]').forEach(btn=>{
+      btn.addEventListener('click', ()=> retryVoiceover(+btn.dataset.retry));
     });
     voList.querySelectorAll('[data-voplay]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
@@ -2947,6 +3150,155 @@
   });
   renderVoiceList();
 
+  // if the tab/laptop closed mid-fetch, pick back up automatically from the
+  // next unfetched file — no need to reopen the library and click Run again
+  (async function autoResumeVoiceFetch(){
+    try{
+      if(localStorage.getItem(VO_RESUME_FLAG) !== '1') return;
+      const all = await idbGetAll('voiceovers');
+      const pending = all.filter(v => v.status !== 'done');
+      if(!pending.length){ localStorage.removeItem(VO_RESUME_FLAG); return; }
+      if(!groqKeyInput.value.trim()) return; // no key saved yet — resume once one is added and Run is clicked
+      setVoStatus('Resuming voice-over fetch where it left off…');
+      await runVoTranscribeQueue();
+    } catch(err){ console.error('voice-over auto-resume failed', err); }
+  })();
+
+  // ---------- background music library: upload once, pick a track per video ----------
+  const musicLibModalOverlay = document.getElementById('musicLibModalOverlay');
+  const musicLibModalClose = document.getElementById('musicLibModalClose');
+  const openMusicLibBtn = document.getElementById('openMusicLibBtn');
+  const qbMusicCount = document.getElementById('qbMusicCount');
+  const musicMultiInput = document.getElementById('musicMultiInput');
+  const musicDropZone = document.getElementById('musicDropZone');
+  const musicStatus = document.getElementById('musicStatus');
+  const musicList = document.getElementById('musicList');
+  const musicEmpty = document.getElementById('musicEmpty');
+  const musicPlayer = document.getElementById('musicPlayer');
+
+  openMusicLibBtn.addEventListener('click', ()=>{ musicLibModalOverlay.classList.add('on'); renderMusicList(); });
+  musicLibModalClose.addEventListener('click', ()=>{ musicLibModalOverlay.classList.remove('on'); });
+  musicLibModalOverlay.addEventListener('click', e=>{ if(e.target === musicLibModalOverlay) musicLibModalOverlay.classList.remove('on'); });
+
+  function setMusicStatus(msg, isError){
+    musicStatus.textContent = msg;
+    musicStatus.style.color = isError ? '#e0866a' : 'var(--green-bright)';
+  }
+
+  async function addMusicFiles(fileList){
+    const files = Array.from(fileList).filter(f => f.type.startsWith('audio/') || /\.mp3$/i.test(f.name));
+    if(!files.length) return;
+    for(const f of files){
+      await idbPut('music', { name: f.name, blob: f, createdAt: Date.now() });
+    }
+    setMusicStatus(`Added ${files.length} track${files.length===1?'':'s'} — saved.`);
+    await renderMusicList();
+  }
+  musicMultiInput.addEventListener('change', e=>{ addMusicFiles(e.target.files); musicMultiInput.value=''; });
+  ['dragenter','dragover'].forEach(ev=>musicDropZone.addEventListener(ev,e=>{e.preventDefault();musicDropZone.classList.add('drag');}));
+  ['dragleave'].forEach(ev=>musicDropZone.addEventListener(ev,e=>{e.preventDefault();musicDropZone.classList.remove('drag');}));
+  musicDropZone.addEventListener('drop', e=>{
+    e.preventDefault();
+    musicDropZone.classList.remove('drag');
+    if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addMusicFiles(e.dataTransfer.files);
+  });
+
+  function clearBgMusicSelection(){
+    bgMusicFile = null;
+    bgMusicId = null;
+    bgMusicSelect.value = '';
+  }
+
+  async function renderBgMusicOptions(){
+    const all = (await idbGetAll('music')).sort((a,b)=> a.name.localeCompare(b.name));
+    bgMusicSelect.innerHTML = ['<option value="">— none —</option>']
+      .concat(all.map(m=>`<option value="${m.id}">${m.name}</option>`)).join('');
+    bgMusicSelect.value = bgMusicId ? String(bgMusicId) : '';
+  }
+
+  bgMusicSelect.addEventListener('change', async ()=>{
+    const val = bgMusicSelect.value;
+    if(!val){ clearBgMusicSelection(); await saveTemplateToStorage(); return; }
+    const m = await idbGet('music', +val);
+    if(!m){ clearBgMusicSelection(); return; }
+    bgMusicId = m.id;
+    bgMusicFile = m.blob;
+    await saveTemplateToStorage();
+  });
+
+  bgMusicPreviewBtn.addEventListener('click', ()=>{
+    if(!bgMusicFile) return;
+    if(musicPlayer.dataset.playingId === 'editor-selection' && !musicPlayer.paused){
+      musicPlayer.pause();
+      return;
+    }
+    musicList.querySelectorAll('[data-mplay]').forEach(b=>b.textContent = '▶');
+    if(musicPlayer.src) URL.revokeObjectURL(musicPlayer.src);
+    musicPlayer.src = URL.createObjectURL(bgMusicFile);
+    musicPlayer.dataset.playingId = 'editor-selection';
+    musicPlayer.play().catch(()=>{});
+    bgMusicPreviewBtn.textContent = '⏸';
+  });
+  musicPlayer.addEventListener('pause', ()=>{ if(musicPlayer.dataset.playingId==='editor-selection') bgMusicPreviewBtn.textContent = '▶'; });
+  musicPlayer.addEventListener('ended', ()=>{
+    bgMusicPreviewBtn.textContent = '▶';
+    musicList.querySelectorAll('[data-mplay]').forEach(b=>b.textContent = '▶');
+  });
+
+  bgMusicVolRange.addEventListener('input', ()=>{
+    bgMusicVolume = (+bgMusicVolRange.value)/100;
+    bgMusicVolVal.textContent = bgMusicVolRange.value + '%';
+    saveTemplateToStorage();
+  });
+
+  async function renderMusicList(){
+    const all = (await idbGetAll('music')).sort((a,b)=> b.createdAt - a.createdAt);
+    musicEmpty.style.display = all.length ? 'none' : 'block';
+    if(all.length){ qbMusicCount.textContent = all.length; qbMusicCount.style.display = 'inline-block'; }
+    else qbMusicCount.style.display = 'none';
+
+    musicList.innerHTML = '';
+    for(const m of all){
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;';
+      row.innerHTML = `
+        <button type="button" class="align-btn" data-mplay="${m.id}" style="padding:6px 9px;flex:0 0 auto;">▶</button>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--paper);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.name}</div>
+        <button type="button" class="align-btn" data-mdel="${m.id}" style="padding:6px 9px;">Delete</button>
+      `;
+      musicList.appendChild(row);
+    }
+    musicList.querySelectorAll('[data-mplay]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = +btn.dataset.mplay;
+        const m = await idbGet('music', id);
+        if(!m || !m.blob) return;
+        if(musicPlayer.dataset.playingId === String(id) && !musicPlayer.paused){
+          musicPlayer.pause();
+          btn.textContent = '▶';
+          return;
+        }
+        musicList.querySelectorAll('[data-mplay]').forEach(b=>b.textContent = '▶');
+        bgMusicPreviewBtn.textContent = '▶';
+        if(musicPlayer.src) URL.revokeObjectURL(musicPlayer.src);
+        musicPlayer.src = URL.createObjectURL(m.blob);
+        musicPlayer.dataset.playingId = String(id);
+        musicPlayer.play().catch(()=>{});
+        btn.textContent = '⏸';
+      });
+    });
+    musicList.querySelectorAll('[data-mdel]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = +btn.dataset.mdel;
+        await idbDelete('music', id);
+        if(bgMusicId === id){ clearBgMusicSelection(); await saveTemplateToStorage(); }
+        await renderMusicList();
+      });
+    });
+    await renderBgMusicOptions();
+  }
+  renderBgMusicOptions();
+
   function closePlayer(){
     playerVideo.pause();
     if(playerVideo.src){ URL.revokeObjectURL(playerVideo.src); playerVideo.removeAttribute('src'); playerVideo.load(); }
@@ -2968,6 +3320,9 @@
     captions = new Array(N).fill('');
 
     if(audioFile){ audioRemove.click(); }
+    clearBgMusicSelection();
+    currentEditingVideoId = null;
+    currentEditorVoiceoverId = null;
 
     fileInput.value = '';
     renderTray();
@@ -3243,6 +3598,63 @@
     return await offline.startRendering();
   }
 
+  // Decodes the voice-over (stretched to match the video's exact length, as
+  // before) and the selected background-music track (looped to fill the
+  // video's length, mixed in underneath at bgMusicVolume), then renders both
+  // together into one final audio buffer. Either track can be missing.
+  async function buildFinalAudioBuffer(dur){
+    const hasVoice = !!audioFile;
+    const hasMusic = !!bgMusicFile;
+    if(!hasVoice && !hasMusic) return null;
+
+    let voiceBuf = null, musicBuf = null;
+    const tmpCtx = new (window.AudioContext||window.webkitAudioContext)();
+    try{
+      if(hasVoice){
+        const arrBuf = await audioFile.arrayBuffer();
+        voiceBuf = await tmpCtx.decodeAudioData(arrBuf);
+        voiceBuf = await syncAudioToDuration(voiceBuf, dur);
+      }
+      if(hasMusic){
+        const arrBuf = await bgMusicFile.arrayBuffer();
+        musicBuf = await tmpCtx.decodeAudioData(arrBuf);
+      }
+    } finally {
+      try{ tmpCtx.close(); }catch(e){}
+    }
+    if(!voiceBuf && !musicBuf) return null;
+
+    const sampleRate = (voiceBuf && voiceBuf.sampleRate) || (musicBuf && musicBuf.sampleRate) || 44100;
+    const channels = Math.max(
+      voiceBuf ? voiceBuf.numberOfChannels : 1,
+      musicBuf ? musicBuf.numberOfChannels : 1,
+      2
+    );
+    const length = Math.max(1, Math.round(dur * sampleRate));
+    const offline = new OfflineAudioContext(channels, length, sampleRate);
+
+    if(voiceBuf){
+      const src = offline.createBufferSource();
+      src.buffer = voiceBuf;
+      src.connect(offline.destination);
+      src.start(0);
+    }
+    if(musicBuf && musicBuf.duration > 0){
+      const gain = offline.createGain();
+      gain.gain.value = typeof bgMusicVolume === 'number' ? bgMusicVolume : 0.25;
+      gain.connect(offline.destination);
+      // loop the track back-to-back so it covers the whole video length,
+      // rather than time-stretching it (stretching music sounds warped)
+      for(let offset=0; offset<dur; offset+=musicBuf.duration){
+        const src = offline.createBufferSource();
+        src.buffer = musicBuf;
+        src.connect(gain);
+        src.start(offset);
+      }
+    }
+    return await offline.startRendering();
+  }
+
   // ---------- export: WebCodecs + mp4-muxer (frame-accurate, real MP4) ----------
   // This is the same architecture Canva / CapCut / Kapwing's browser editors use:
   // draw each frame deterministically, hand it straight to the H.264 hardware
@@ -3286,18 +3698,13 @@
 
     const totalFrames = Math.max(1, Math.round(dur * fps));
 
-    // ---- optional audio track: decode the mp3 fully up front ----
-    let audioBuf = null, audioCtxTmp = null;
-    if(audioFile){
-      try{
-        audioCtxTmp = new (window.AudioContext||window.webkitAudioContext)();
-        const arrBuf = await audioFile.arrayBuffer();
-        audioBuf = await audioCtxTmp.decodeAudioData(arrBuf);
-        audioBuf = await syncAudioToDuration(audioBuf, dur);
-      } catch(err){
-        console.error('audio decode failed, exporting silent', err);
-        audioBuf = null;
-      }
+    // ---- optional audio track: decode + mix voice-over and background music up front ----
+    let audioBuf = null;
+    try{
+      audioBuf = await buildFinalAudioBuffer(dur);
+    } catch(err){
+      console.error('audio build failed, exporting silent', err);
+      audioBuf = null;
     }
     const hasAudio = !!audioBuf;
     const audioSampleRate = hasAudio ? audioBuf.sampleRate : 44100;
@@ -3383,7 +3790,7 @@
       await audioEncoder.flush();
       audioEncoder.close();
     }
-    if(audioCtxTmp){ try{ audioCtxTmp.close(); }catch(e){} }
+    // (temp AudioContext used to decode/mix is already closed inside buildFinalAudioBuffer)
 
     onProgress(90);
     muxer.finalize();
@@ -3432,20 +3839,18 @@
 
     let recStream = videoStream;
     let audioCtx = null, audioSrc = null;
-    if(audioFile){
-      try{
+    try{
+      const mixedBuf = await buildFinalAudioBuffer(dur);
+      if(mixedBuf){
         audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-        const arrBuf = await audioFile.arrayBuffer();
-        let audioBuf = await audioCtx.decodeAudioData(arrBuf);
-        audioBuf = await syncAudioToDuration(audioBuf, dur);
         const dest = audioCtx.createMediaStreamDestination();
         audioSrc = audioCtx.createBufferSource();
-        audioSrc.buffer = audioBuf;
+        audioSrc.buffer = mixedBuf;
         audioSrc.connect(dest);
         recStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
         audioSrc.start(0);
-      } catch(err){ console.error('audio mix failed, exporting silent', err); }
-    }
+      }
+    } catch(err){ console.error('audio mix failed, exporting silent', err); }
 
     const recorder = new MediaRecorder(recStream, {mimeType:mime, videoBitsPerSecond: 8_000_000});
     const chunks = [];
