@@ -550,6 +550,25 @@
     text-align:right;
     font-size:10px;
   }
+  .dual-range{position:relative;height:26px;}
+  .dual-range .dr-track{position:absolute;left:0;right:0;top:12px;height:2px;background:var(--line);border-radius:2px;}
+  .dual-range .dr-fill{position:absolute;top:12px;height:2px;background:var(--green-bright);border-radius:2px;}
+  .dual-range input[type=range]{
+    position:absolute;left:0;top:0;width:100%;height:26px;margin:0;
+    -webkit-appearance:none;appearance:none;background:transparent;pointer-events:none;
+  }
+  .dual-range input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;pointer-events:auto;
+    width:13px;height:13px;border-radius:50%;
+    background:var(--paper);border:2px solid var(--green-bright);
+    cursor:pointer;position:relative;top:0;
+  }
+  .dual-range input[type=range]::-moz-range-thumb{
+    pointer-events:auto;width:11px;height:11px;border-radius:50%;
+    background:var(--paper);border:2px solid var(--green-bright);cursor:pointer;
+  }
+  .dual-range input[type=range]::-webkit-slider-runnable-track{background:transparent;}
+  .dual-range input[type=range]::-moz-range-track{background:transparent;}
   .timing-row select{
     grid-column:2/4;
     background:#0d0f0c;
@@ -944,7 +963,20 @@
         <label style="font-size:9.5px;color:rgba(242,240,230,0.55);">Music volume: <span id="bgMusicVolVal">25%</span></label>
         <input type="range" id="bgMusicVolRange" min="0" max="100" value="25" style="width:100%;">
       </div>
-      <div class="ds" style="margin-top:4px;">loops under the full video, mixed under the voice-over · pick tracks from 🎵 Music library above</div>
+      <div style="margin-top:10px;" id="bgMusicTrimWrap">
+        <label style="font-size:9.5px;color:rgba(242,240,230,0.55);display:flex;justify-content:space-between;">
+          <span>Trim clip: <span id="bgMusicTrimLabel" style="color:var(--green-bright);">0:00–0:00</span></span>
+          <span id="bgMusicDurLabel" style="opacity:.55;"></span>
+        </label>
+        <div class="dual-range" id="bgMusicTrimTrack" style="margin-top:6px;">
+          <div class="dr-track"></div>
+          <div class="dr-fill" id="bgMusicTrimFill"></div>
+          <input type="range" id="bgMusicStartRange" min="0" max="1000" value="0" step="1">
+          <input type="range" id="bgMusicEndRange" min="0" max="1000" value="1000" step="1">
+        </div>
+        <div class="ds" style="margin-top:2px;">drag either handle to pick the section that plays · e.g. 0:35–1:20</div>
+      </div>
+      <div class="ds" style="margin-top:4px;">loops the trimmed section under the full video, mixed under the voice-over — hit ▶ to hear it live at the set volume · pick tracks from 🎵 Music library above</div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:10px;">
@@ -1072,6 +1104,9 @@
   let bgMusicFile = null;            // selected background-music Blob (from the music library)
   let bgMusicId = null;              // id of the selected track in the 'music' store
   let bgMusicVolume = 0.25;          // 0..1, mixed under the voice-over on export
+  let bgMusicTrimStart = 0;          // seconds, start of the trimmed section
+  let bgMusicTrimEnd = null;         // seconds, end of the trimmed section (null = full track)
+  let bgMusicDuration = 0;           // seconds, full decoded length of the current track
   let currentEditingVideoId = null;  // id of the gallery video currently open in the editor, if any
   let currentEditorVoiceoverId = null; // voiceover attached to an unsaved editor session
   let cardColorAuto = true;          // when true, card color is derived from loaded images
@@ -1179,6 +1214,11 @@
   const bgMusicPreviewBtn = document.getElementById('bgMusicPreviewBtn');
   const bgMusicVolRange = document.getElementById('bgMusicVolRange');
   const bgMusicVolVal = document.getElementById('bgMusicVolVal');
+  const bgMusicStartRange = document.getElementById('bgMusicStartRange');
+  const bgMusicEndRange = document.getElementById('bgMusicEndRange');
+  const bgMusicTrimFill = document.getElementById('bgMusicTrimFill');
+  const bgMusicTrimLabel = document.getElementById('bgMusicTrimLabel');
+  const bgMusicDurLabel = document.getElementById('bgMusicDurLabel');
   const tmplSaveBtn = document.getElementById('tmplSaveBtn');
   const tmplRestoreBtn = document.getElementById('tmplRestoreBtn');
   const tmplPickerWrap = document.getElementById('tmplPickerWrap');
@@ -2292,6 +2332,8 @@
       bgMusicFileName: bgMusicFile ? (bgMusicFile.name || null) : null,
       bgMusicId: bgMusicId || null,
       bgMusicVolume,
+      bgMusicTrimStart,
+      bgMusicTrimEnd,
       cardColorAuto, cardColorManual, cardColorAlpha,
       cardBgMode, cardBgImageIdx, cardTextColor
     };
@@ -2411,9 +2453,18 @@
     if(t.bgMusicFile){
       bgMusicFile = t.bgMusicFile;
       bgMusicId = typeof t.bgMusicId === 'number' ? t.bgMusicId : null;
+      await loadBgMusicDuration();
+      bgMusicTrimStart = typeof t.bgMusicTrimStart === 'number' ? t.bgMusicTrimStart : 0;
+      bgMusicTrimEnd = typeof t.bgMusicTrimEnd === 'number' ? t.bgMusicTrimEnd : bgMusicDuration;
+      if(bgMusicDuration > 0){
+        bgMusicStartRange.value = Math.round((bgMusicTrimStart/bgMusicDuration)*1000);
+        bgMusicEndRange.value = Math.round((bgMusicTrimEnd/bgMusicDuration)*1000);
+      }
+      updateTrimUI();
     } else {
       bgMusicFile = null;
       bgMusicId = null;
+      resetBgMusicTrim();
     }
     await renderBgMusicOptions();
 
@@ -3218,13 +3269,77 @@
 
   bgMusicSelect.addEventListener('change', async ()=>{
     const val = bgMusicSelect.value;
-    if(!val){ clearBgMusicSelection(); await saveTemplateToStorage(); return; }
+    if(!val){ clearBgMusicSelection(); resetBgMusicTrim(); await saveTemplateToStorage(); return; }
     const m = await idbGet('music', +val);
     if(!m){ clearBgMusicSelection(); return; }
     bgMusicId = m.id;
     bgMusicFile = m.blob;
+    bgMusicTrimStart = 0; bgMusicTrimEnd = null;
+    await loadBgMusicDuration();
     await saveTemplateToStorage();
   });
+
+  // ---------- trim: reads the real duration once, drives a dual-handle slider ----------
+  function fmtClock(s){
+    s = Math.max(0, Math.round(s||0));
+    const m = Math.floor(s/60), r = s%60;
+    return `${m}:${String(r).padStart(2,'0')}`;
+  }
+  function resetBgMusicTrim(){
+    bgMusicDuration = 0; bgMusicTrimStart = 0; bgMusicTrimEnd = null;
+    bgMusicStartRange.value = 0; bgMusicEndRange.value = 1000;
+    bgMusicDurLabel.textContent = '';
+    updateTrimUI();
+  }
+  function loadBgMusicDuration(){
+    return new Promise(resolve=>{
+      if(!bgMusicFile){ resetBgMusicTrim(); resolve(); return; }
+      const probe = document.createElement('audio');
+      const url = URL.createObjectURL(bgMusicFile);
+      probe.preload = 'metadata';
+      probe.src = url;
+      probe.addEventListener('loadedmetadata', ()=>{
+        bgMusicDuration = isFinite(probe.duration) ? probe.duration : 0;
+        bgMusicTrimStart = 0; bgMusicTrimEnd = bgMusicDuration;
+        bgMusicStartRange.value = 0; bgMusicEndRange.value = 1000;
+        bgMusicDurLabel.textContent = 'full ' + fmtClock(bgMusicDuration);
+        updateTrimUI();
+        URL.revokeObjectURL(url);
+        resolve();
+      }, {once:true});
+      probe.addEventListener('error', ()=>{ URL.revokeObjectURL(url); resolve(); }, {once:true});
+    });
+  }
+  function updateTrimUI(){
+    const dur = bgMusicDuration || 0;
+    const startSec = dur * (+bgMusicStartRange.value/1000);
+    const endSec = dur * (+bgMusicEndRange.value/1000);
+    bgMusicTrimLabel.textContent = dur ? `${fmtClock(startSec)}–${fmtClock(endSec)}` : '0:00–0:00';
+    const lo = Math.min(+bgMusicStartRange.value, +bgMusicEndRange.value)/10;
+    const hi = Math.max(+bgMusicStartRange.value, +bgMusicEndRange.value)/10;
+    bgMusicTrimFill.style.left = lo + '%';
+    bgMusicTrimFill.style.width = (hi-lo) + '%';
+  }
+  function commitTrimFromSliders(){
+    const dur = bgMusicDuration || 0;
+    let a = dur * (+bgMusicStartRange.value/1000);
+    let b = dur * (+bgMusicEndRange.value/1000);
+    if(a > b){ [a,b] = [b,a]; }
+    if(b - a < 0.5){ b = Math.min(dur, a + 0.5); } // keep a usable minimum window
+    bgMusicTrimStart = a;
+    bgMusicTrimEnd = b;
+    updateTrimUI();
+  }
+  [bgMusicStartRange, bgMusicEndRange].forEach(r=>{
+    r.addEventListener('input', updateTrimUI);
+    r.addEventListener('change', ()=>{ commitTrimFromSliders(); restartMusicPreviewIfPlaying(); saveTemplateToStorage(); });
+  });
+
+  function restartMusicPreviewIfPlaying(){
+    if(musicPlayer.dataset.playingId === 'editor-selection' && !musicPlayer.paused){
+      musicPlayer.currentTime = bgMusicTrimStart;
+    }
+  }
 
   bgMusicPreviewBtn.addEventListener('click', ()=>{
     if(!bgMusicFile) return;
@@ -3235,9 +3350,22 @@
     musicList.querySelectorAll('[data-mplay]').forEach(b=>b.textContent = '▶');
     if(musicPlayer.src) URL.revokeObjectURL(musicPlayer.src);
     musicPlayer.src = URL.createObjectURL(bgMusicFile);
+    musicPlayer.volume = bgMusicVolume;
     musicPlayer.dataset.playingId = 'editor-selection';
+    musicPlayer.addEventListener('loadedmetadata', function once(){
+      musicPlayer.currentTime = bgMusicTrimStart;
+      musicPlayer.removeEventListener('loadedmetadata', once);
+    });
     musicPlayer.play().catch(()=>{});
     bgMusicPreviewBtn.textContent = '⏸';
+  });
+  // loop the preview inside the trimmed window, so what you hear here is exactly what exports
+  musicPlayer.addEventListener('timeupdate', ()=>{
+    if(musicPlayer.dataset.playingId !== 'editor-selection' && musicPlayer.dataset.playingId !== 'video-mix') return;
+    const end = (bgMusicTrimEnd!=null && bgMusicTrimEnd>bgMusicTrimStart) ? bgMusicTrimEnd : musicPlayer.duration;
+    if(end && musicPlayer.currentTime >= end - 0.05){
+      musicPlayer.currentTime = bgMusicTrimStart;
+    }
   });
   musicPlayer.addEventListener('pause', ()=>{ if(musicPlayer.dataset.playingId==='editor-selection') bgMusicPreviewBtn.textContent = '▶'; });
   musicPlayer.addEventListener('ended', ()=>{
@@ -3248,6 +3376,7 @@
   bgMusicVolRange.addEventListener('input', ()=>{
     bgMusicVolume = (+bgMusicVolRange.value)/100;
     bgMusicVolVal.textContent = bgMusicVolRange.value + '%';
+    musicPlayer.volume = bgMusicVolume;   // audible live — no need to download/export to hear the level
     saveTemplateToStorage();
   });
 
@@ -3539,6 +3668,7 @@
       previewAudio.currentTime = Math.min(playFrom, previewAudio.duration||playFrom);
       previewAudio.play().catch(()=>{});
     }
+    playBgMusicLive(playFrom);
     tick();
   });
   function stopPreview(){
@@ -3546,6 +3676,37 @@
     playIcon.innerHTML = '<path d="M4 2.5V13.5L13 8L4 2.5Z" fill="currentColor"/>';
     if(rafId) cancelAnimationFrame(rafId);
     if(audioFile && previewAudio.src){ previewAudio.pause(); }
+    stopBgMusicLive();
+  }
+  // ---------- hear the background music live, mixed at the real export volume, while scrubbing/playing the video ----------
+  // This is the same <audio id="musicPlayer"> used by the library/trim preview, reused here so
+  // there's exactly one audible source at a time and the volume slider affects it instantly.
+  function bgMusicOffsetFor(videoT){
+    const winStart = bgMusicTrimStart || 0;
+    const winEnd = (bgMusicTrimEnd!=null && bgMusicTrimEnd>winStart) ? bgMusicTrimEnd : bgMusicDuration;
+    const winLen = Math.max(0.1, (winEnd||0.1) - winStart);
+    return winStart + (videoT % winLen);
+  }
+  function playBgMusicLive(fromVideoT){
+    if(!bgMusicFile) return;
+    if(musicPlayer.src && musicPlayer.dataset.playingId !== 'video-mix'){
+      musicPlayer.pause();
+      if(musicPlayer.src) URL.revokeObjectURL(musicPlayer.src);
+      musicPlayer.src = '';
+    }
+    if(musicPlayer.dataset.playingId !== 'video-mix' || !musicPlayer.src){
+      musicPlayer.src = URL.createObjectURL(bgMusicFile);
+      musicPlayer.dataset.playingId = 'video-mix';
+    }
+    musicPlayer.volume = bgMusicVolume;
+    musicPlayer.loop = false; // looping is handled inside the trim window via timeupdate
+    const seekAndPlay = ()=>{ musicPlayer.currentTime = bgMusicOffsetFor(fromVideoT); musicPlayer.play().catch(()=>{}); };
+    if(musicPlayer.readyState >= 1) seekAndPlay();
+    else musicPlayer.addEventListener('loadedmetadata', seekAndPlay, {once:true});
+    bgMusicPreviewBtn.textContent = '▶';
+  }
+  function stopBgMusicLive(){
+    if(musicPlayer.dataset.playingId === 'video-mix'){ musicPlayer.pause(); }
   }
   function tick(){
     const dur = totalDuration();
@@ -3572,6 +3733,7 @@
       timecode.textContent = `${t.toFixed(1)} / ${dur.toFixed(1)}s`;
       setProgress(ratio);
       if(audioFile && previewAudio.src) previewAudio.currentTime = Math.min(t, previewAudio.duration||t);
+      if(bgMusicFile && musicPlayer.dataset.playingId === 'video-mix') musicPlayer.currentTime = bgMusicOffsetFor(t);
     }
     progressLine.addEventListener('mousedown', e=>{ if(playing) stopPreview(); scrubbing=true; seek(e.clientX); });
     window.addEventListener('mousemove', e=>{ if(scrubbing) seek(e.clientX); });
@@ -3643,13 +3805,18 @@
       const gain = offline.createGain();
       gain.gain.value = typeof bgMusicVolume === 'number' ? bgMusicVolume : 0.25;
       gain.connect(offline.destination);
-      // loop the track back-to-back so it covers the whole video length,
-      // rather than time-stretching it (stretching music sounds warped)
-      for(let offset=0; offset<dur; offset+=musicBuf.duration){
+      // only the trimmed section is used, looped back-to-back to cover the whole
+      // video length — this exactly matches what the live preview plays
+      const trimStart = Math.max(0, Math.min(bgMusicTrimStart || 0, musicBuf.duration));
+      let trimEnd = (typeof bgMusicTrimEnd === 'number' && bgMusicTrimEnd > trimStart)
+        ? Math.min(bgMusicTrimEnd, musicBuf.duration) : musicBuf.duration;
+      const segDur = Math.max(0.05, trimEnd - trimStart);
+      for(let offset=0; offset<dur; offset+=segDur){
         const src = offline.createBufferSource();
         src.buffer = musicBuf;
         src.connect(gain);
-        src.start(offset);
+        const playDur = Math.min(segDur, dur - offset);
+        src.start(offset, trimStart, playDur);
       }
     }
     return await offline.startRendering();
