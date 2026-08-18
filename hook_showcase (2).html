@@ -892,7 +892,7 @@
 
     <div class="field">
       <label>Hook flash caption (act 1, optional, shown on every flash)</label>
-      <input type="text" id="hookCapText" placeholder="e.g. wait for it..." maxlength="60">
+      <input type="text" id="hookCapText" placeholder="e.g. wait for it...">
       <div class="timing-row" style="margin-top:10px;grid-template-columns:1fr auto;">
         <span>Caption size</span>
         <div class="stepper" id="hookCapSizeStepper">
@@ -942,6 +942,16 @@
         <div class="ds" id="audioDS">plays under the full video, muted after export finishes</div>
       </label>
       <button class="align-btn" id="audioRemove" style="display:none;margin-top:8px;width:100%;">Remove audio</button>
+      <div id="voiceSpeedBox" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+        <label style="display:flex;justify-content:space-between;margin-bottom:6px;"><span>Voice-over speed</span><span id="voiceSpeedVal" style="color:var(--green-bright);">1.00x</span></label>
+        <input type="range" id="voiceSpeedRange" min="0.5" max="2" step="0.01" value="1">
+        <div class="ds" style="margin-top:2px;">time-stretches the voice-over — same pitch-preserving WSOLA algorithm speed-changer sites like mp3cut use, not a raw pitch-shifted resample. No more round-tripping through another site.</div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button type="button" id="voiceSpeedApplyBtn" class="align-btn" style="flex:1;">Apply speed</button>
+          <button type="button" id="voiceSpeedResetBtn" class="align-btn" style="display:none;">Reset to 1x</button>
+        </div>
+        <div id="voiceSpeedStatus" class="ds" style="margin-top:6px;"></div>
+      </div>
       <div id="whisperBox" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
         <label style="display:block;margin-bottom:6px;">Groq API key (for voice sync, saved locally)</label>
         <input type="password" id="groqKeyInput" placeholder="gsk_..." style="width:100%;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;box-sizing:border-box;">
@@ -1210,6 +1220,13 @@
   const audioDT = document.getElementById('audioDT');
   const audioDS = document.getElementById('audioDS');
   const audioRemove = document.getElementById('audioRemove');
+  const voiceSpeedBox = document.getElementById('voiceSpeedBox');
+  const voiceSpeedRange = document.getElementById('voiceSpeedRange');
+  const voiceSpeedVal = document.getElementById('voiceSpeedVal');
+  const voiceSpeedApplyBtn = document.getElementById('voiceSpeedApplyBtn');
+  const voiceSpeedResetBtn = document.getElementById('voiceSpeedResetBtn');
+  const voiceSpeedStatus = document.getElementById('voiceSpeedStatus');
+  let originalAudioFile = null; // the pristine upload — speed changes always re-stretch from this, never from an already-stretched file, so quality never compounds
   const bgMusicSelect = document.getElementById('bgMusicSelect');
   const bgMusicPreviewBtn = document.getElementById('bgMusicPreviewBtn');
   const bgMusicVolRange = document.getElementById('bgMusicVolRange');
@@ -1243,6 +1260,21 @@
   const galleryEmpty = document.getElementById('galleryEmpty');
   const progressLine = document.getElementById('progressLine');
   const playhead = document.getElementById('playhead');
+
+  // ---------- global audio guard: exactly one audio source plays at a time ----------
+  // Bug fixed: gallery preview (playerVideo, baked-in music) kept playing behind the
+  // scenes after reopening a video for editing or starting a new one, so its music
+  // overlapped the editor's live music preview (musicPlayer) — sounded like 2 tracks
+  // at once. Every entry point that starts a new sound now calls this first.
+  function stopAllAudio(){
+    try{ if(playing) stopPreview(); }catch(e){}
+    try{ playerVideo.pause(); }catch(e){}
+    try{
+      const vp = document.getElementById('voPlayer');
+      if(vp) vp.pause();
+    }catch(e){}
+    try{ musicPlayer.pause(); }catch(e){}
+  }
 
   // ---------- timeline construction ----------
   function getSegments(){
@@ -1633,6 +1665,7 @@
     const f = e.target.files[0];
     if(!f) return;
     audioFile = f;
+    originalAudioFile = f;
     audioDT.textContent = f.name;
     audioDS.textContent = 'Ready — mixed into the exported video';
     audioRemove.style.display = 'block';
@@ -1640,15 +1673,23 @@
     previewAudioUrl = URL.createObjectURL(f);
     previewAudio.src = previewAudioUrl;
     whisperBox.style.display = 'block';
+    voiceSpeedBox.style.display = 'block';
+    voiceSpeedRange.value = 1;
+    voiceSpeedVal.textContent = '1.00x';
+    voiceSpeedResetBtn.style.display = 'none';
+    voiceSpeedStatus.textContent = '';
   });
   audioRemove.addEventListener('click', e=>{
     e.preventDefault();
     audioFile = null;
+    originalAudioFile = null;
     audioInput.value = '';
     audioDT.textContent = 'Add MP3';
     audioDS.textContent = 'plays under the full video, muted after export finishes';
     audioRemove.style.display = 'none';
     whisperBox.style.display = 'none';
+    voiceSpeedBox.style.display = 'none';
+    voiceSpeedStatus.textContent = '';
     syncStatus.textContent = '';
     if(previewAudioUrl){ URL.revokeObjectURL(previewAudioUrl); previewAudioUrl = null; }
     previewAudio.removeAttribute('src'); previewAudio.load();
@@ -1664,12 +1705,147 @@
     }
   });
 
-  // ---------- Whisper word-timestamp sync ----------
-  // Sends the mp3 to Groq's Whisper endpoint with word-level timestamps, then walks the
-  // returned words in order, assigning each caption box exactly as many words as it has
-  // typed, and setting that caption's on-screen duration to the real spoken time for
-  // those words. Fixes both the "sounds like a penguin" pitch issue and the desync issue,
-  // because durations now come straight from how the girl actually paced the words.
+  // ---------- voice-over speed changer (WSOLA time-stretch, pitch preserved) ----------
+  // Uses SoundTouchJS — a JS port of the same SoundTouch/WSOLA algorithm family that
+  // pitch-preserving speed tools (mp3cut.net's "Change speed", ffmpeg's atempo, etc) are
+  // built on — so speeding up a voice-over doesn't chipmunk it. This replaces the old
+  // "download from this app, run it through mp3cut.net, re-upload" round trip with one
+  // in-app button. Always re-stretches from the ORIGINAL upload (never from an
+  // already-stretched file), so nudging the slider a few times never compounds artifacts.
+  async function loadSoundTouch(){
+    if(window.__STJS) return window.__STJS;
+    const CDNS = [
+      'https://cdn.jsdelivr.net/npm/soundtouchjs@0.3.0/dist/soundtouch.js',
+      'https://unpkg.com/soundtouchjs@0.3.0/dist/soundtouch.js'
+    ];
+    let lastErr;
+    for(const url of CDNS){
+      try{ const mod = await import(/* webpackIgnore: true */ url); window.__STJS = mod; return mod; }
+      catch(err){ lastErr = err; }
+    }
+    throw lastErr || new Error('Could not load the speed-change library.');
+  }
+
+  async function timeStretchAudioBuffer(audioBuffer, speed){
+    const { SoundTouch, SimpleFilter, WebAudioBufferSource } = await loadSoundTouch();
+    const source = new WebAudioBufferSource(audioBuffer);
+    const st = new SoundTouch();
+    st.tempo = speed; // time-stretch only — pitch left untouched, exactly what "change speed" (not "change pitch") means on mp3cut
+    st.pitch = 1;
+    st.rate = 1;
+    const filter = new SimpleFilter(source, st);
+    const CHUNK = 4096;
+    const chunk = new Float32Array(CHUNK*2);
+    const parts = [];
+    let totalFrames = 0;
+    const hardCap = Math.ceil(audioBuffer.length / Math.max(0.1, speed)) + audioBuffer.sampleRate*10; // safety stop
+    while(true){
+      const n = filter.extract(chunk, CHUNK);
+      if(n <= 0) break;
+      parts.push(chunk.slice(0, n*2));
+      totalFrames += n;
+      if(totalFrames > hardCap) break;
+    }
+    const outBuf = new AudioBuffer({ numberOfChannels: 2, length: Math.max(1,totalFrames), sampleRate: audioBuffer.sampleRate });
+    const L = outBuf.getChannelData(0), R = outBuf.getChannelData(1);
+    let offset = 0;
+    for(const part of parts){
+      const n = part.length/2;
+      for(let i=0;i<n;i++){ L[offset+i] = part[i*2]; R[offset+i] = part[i*2+1]; }
+      offset += n;
+    }
+    return outBuf;
+  }
+
+  function audioBufferToWavBlob(buffer){
+    const numCh = buffer.numberOfChannels, sampleRate = buffer.sampleRate, numFrames = buffer.length;
+    const blockAlign = numCh*2, dataSize = numFrames*blockAlign;
+    const ab = new ArrayBuffer(44+dataSize);
+    const view = new DataView(ab);
+    const writeStr = (o,s)=>{ for(let i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); };
+    writeStr(0,'RIFF'); view.setUint32(4, 36+dataSize, true); writeStr(8,'WAVE');
+    writeStr(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
+    view.setUint16(22,numCh,true); view.setUint32(24,sampleRate,true);
+    view.setUint32(28, sampleRate*blockAlign, true); view.setUint16(32, blockAlign, true);
+    view.setUint16(34,16,true); writeStr(36,'data'); view.setUint32(40,dataSize,true);
+    const chans = []; for(let c=0;c<numCh;c++) chans.push(buffer.getChannelData(c));
+    let offset = 44;
+    for(let i=0;i<numFrames;i++){
+      for(let c=0;c<numCh;c++){
+        const s = Math.max(-1, Math.min(1, chans[c][i]));
+        view.setInt16(offset, s<0 ? s*0x8000 : s*0x7fff, true);
+        offset += 2;
+      }
+    }
+    return new Blob([ab], {type:'audio/wav'});
+  }
+
+  voiceSpeedRange.addEventListener('input', ()=>{
+    voiceSpeedVal.textContent = (+voiceSpeedRange.value).toFixed(2) + 'x';
+  });
+
+  voiceSpeedApplyBtn.addEventListener('click', async ()=>{
+    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return; }
+    const speed = +voiceSpeedRange.value || 1;
+    voiceSpeedApplyBtn.disabled = true;
+    voiceSpeedStatus.style.color = '';
+    voiceSpeedStatus.textContent = 'Time-stretching (pitch preserved)…';
+    try{
+      const tmpCtx = new (window.AudioContext||window.webkitAudioContext)();
+      let decoded;
+      try{
+        decoded = await tmpCtx.decodeAudioData(await originalAudioFile.arrayBuffer());
+      } finally { try{ tmpCtx.close(); }catch(e){} }
+      const stretched = await timeStretchAudioBuffer(decoded, speed);
+      const blob = audioBufferToWavBlob(stretched);
+      const baseName = (originalAudioFile.name||'voiceover').replace(/\.[^.]+$/,'');
+      const newFile = new File([blob], `${baseName}-${speed.toFixed(2)}x.wav`, {type:'audio/wav'});
+
+      stopAllAudio();
+      audioFile = newFile;
+      audioDT.textContent = newFile.name;
+      audioDS.textContent = 'Ready — mixed into the exported video';
+      if(previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
+      previewAudioUrl = URL.createObjectURL(newFile);
+      previewAudio.src = previewAudioUrl;
+      voiceSpeedResetBtn.style.display = Math.abs(speed-1) < 0.005 ? 'none' : 'inline-block';
+      voiceSpeedStatus.style.color = '#8fd19e';
+      voiceSpeedStatus.textContent = `Done — voice-over is now ${speed.toFixed(2)}x speed, pitch unchanged.`;
+      await saveTemplateToStorage();
+    } catch(err){
+      console.error(err);
+      voiceSpeedStatus.style.color = '#e0866a';
+      voiceSpeedStatus.textContent = err.message || 'Speed change failed.';
+    } finally {
+      voiceSpeedApplyBtn.disabled = false;
+    }
+  });
+
+  voiceSpeedResetBtn.addEventListener('click', async ()=>{
+    if(!originalAudioFile) return;
+    stopAllAudio();
+    audioFile = originalAudioFile;
+    audioDT.textContent = audioFile.name;
+    audioDS.textContent = 'Ready — mixed into the exported video';
+    if(previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
+    previewAudioUrl = URL.createObjectURL(audioFile);
+    previewAudio.src = previewAudioUrl;
+    voiceSpeedRange.value = 1;
+    voiceSpeedVal.textContent = '1.00x';
+    voiceSpeedResetBtn.style.display = 'none';
+    voiceSpeedStatus.style.color = '#8fd19e';
+    voiceSpeedStatus.textContent = 'Back to the original speed.';
+    await saveTemplateToStorage();
+  });
+
+  // ---------- real audio/transcript sync ----------
+  // Sends the mp3 to Groq Whisper for word-level timestamps, then FORCE-ALIGNS each
+  // caption's actual text against the transcript (fuzzy subsequence matching, tolerant
+  // of filler words, ums, re-phrasing, and words spoken out of caption order) instead of
+  // blindly consuming "however many words the caption has, in order". Each caption's
+  // start/end is taken from where its own words were actually detected in the audio, so
+  // an image whose caption is spoken late still gets shown late, and one spoken early
+  // still gets shown early — this is proper forced alignment, not a fixed timer.
   async function transcribeWithGroq(file, apiKey){
     const form = new FormData();
     form.append('file', file);
@@ -1688,12 +1864,61 @@
     return await res.json();
   }
 
+  // -- text normalization + fuzzy token match (handles punctuation, casing, light typos/tense) --
+  function syncNormWord(w){
+    return (w||'').toLowerCase().replace(/[^a-z0-9']/g,'');
+  }
+  function syncLevenshtein(a,b){
+    const m=a.length, n=b.length;
+    if(!m) return n; if(!n) return m;
+    const dp = new Array(n+1);
+    for(let j=0;j<=n;j++) dp[j]=j;
+    for(let i=1;i<=m;i++){
+      let prev = dp[0]; dp[0]=i;
+      for(let j=1;j<=n;j++){
+        const tmp = dp[j];
+        dp[j] = Math.min(dp[j]+1, dp[j-1]+1, prev + (a[i-1]===b[j-1] ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    return dp[n];
+  }
+  function syncWordsMatch(a,b){
+    if(!a || !b) return false;
+    if(a===b) return true;
+    // tolerate plurals/verb endings ("share" vs "shares") and light typos on longer words
+    if(a.length>=3 && b.length>=3 && (a.startsWith(b) || b.startsWith(a))) return true;
+    if(a.length>3 && b.length>3 && syncLevenshtein(a,b) <= 1) return true;
+    return false;
+  }
+  // Finds each caption's words, in order, as a subsequence of the transcript starting at
+  // or after `startAt` — skipping any spoken filler words in between that aren't part of
+  // the caption (that's what makes this real alignment instead of a word counter).
+  function syncAlignCaption(capTokens, words, startAt){
+    const SKIP_BUDGET = 60; // how far ahead (in transcript words) to look for each token
+    let p = startAt;
+    const matchedIdxs = [];
+    for(const tok of capTokens){
+      const limit = Math.min(words.length, p + SKIP_BUDGET);
+      let found = -1;
+      for(let k=p;k<limit;k++){
+        if(syncWordsMatch(tok, syncNormWord(words[k].word))){ found = k; break; }
+      }
+      if(found === -1) continue; // this token wasn't found nearby — skip it, don't lose the rest
+      matchedIdxs.push(found);
+      p = found + 1;
+    }
+    const minNeeded = Math.max(1, Math.ceil(capTokens.length*0.34));
+    if(matchedIdxs.length < minNeeded) return null;
+    return matchedIdxs;
+  }
+
   syncVoiceBtn.addEventListener('click', async ()=>{
     const apiKey = groqKeyInput.value.trim();
     if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return; }
     if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return; }
-    const capWordCounts = captions.map(c => (c||'').trim().split(/\s+/).filter(Boolean).length);
-    if(capWordCounts.every(n => n===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches words to them.'; return; }
+    const capTokensList = captions.map(c => (c||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean));
+    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return; }
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
@@ -1702,29 +1927,68 @@
       const data = await transcribeWithGroq(audioFile, apiKey);
       const words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
       if(!words || !words.length) throw new Error('No word timestamps returned.');
+      const totalDur = words[words.length-1].end;
 
-      let wi = 0;
-      const newDur = showDur.slice();
-      const rows = [];
+      // pass 1 — force-align each caption's own text to where it's actually spoken
+      syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
+      let pointer = 0;
+      const matches = new Array(N).fill(null); // {start,end,matchedIdxs} | null
       for(let i=0;i<N;i++){
-        const need = capWordCounts[i];
-        if(!need || wi >= words.length){ continue; }
-        const chunk = words.slice(wi, Math.min(wi+need, words.length));
-        wi += need;
-        if(chunk.length){
-          const span = chunk[chunk.length-1].end - chunk[0].start;
-          newDur[i] = Math.max(0.2, +span.toFixed(2));
-          rows.push({ i, text: chunk.map(w=>w.word).join(' ').trim(), dur: newDur[i] });
+        const toks = capTokensList[i];
+        if(!toks.length) continue;
+        const idxs = syncAlignCaption(toks, words, pointer);
+        if(idxs){
+          matches[i] = { start: words[idxs[0]].start, end: words[idxs[idxs.length-1]].end, hitCount: idxs.length, tokCount: toks.length };
+          pointer = idxs[idxs.length-1] + 1;
         }
       }
-      // any leftover transcribed time (captions didn't cover it) — add to last used caption
-      if(wi < words.length){
-        const lastIdx = capWordCounts.map((n,i)=>n>0?i:-1).filter(i=>i>=0).pop();
-        if(lastIdx !== undefined){
-          const leftover = words[words.length-1].end - words[wi].start;
-          newDur[lastIdx] = Math.max(0.2, +(newDur[lastIdx]+leftover).toFixed(2));
-          const r = rows.find(r=>r.i===lastIdx);
-          if(r) r.dur = newDur[lastIdx];
+
+      const matchedIdxs = matches.map((m,i)=> m ? i : -1).filter(i=>i>=0);
+      if(!matchedIdxs.length) throw new Error('Could not match any caption text to the voice-over — check the captions match what\'s actually said.');
+
+      // pass 2 — turn matched anchor points into a full per-image duration timeline.
+      // A matched caption's segment runs from where its speech starts to where the NEXT
+      // matched caption's speech starts (no dead-air gap between images); any caption(s)
+      // between two anchors that couldn't be matched share that gap, weighted by their
+      // own word count, so nothing collapses to zero and the sequence stays intact.
+      const newDur = showDur.slice();
+      const rows = [];
+      let groupStart = 0; // caption index
+      for(let g=0; g<matchedIdxs.length; g++){
+        const anchorIdx = matchedIdxs[g];
+        const segStartT = matches[anchorIdx].start;
+        const segEndT = (g+1<matchedIdxs.length) ? matches[matchedIdxs[g+1]].start : totalDur;
+        const groupEnd = (g+1<matchedIdxs.length) ? matchedIdxs[g+1] : N; // exclusive
+        // members of this group: the anchor itself plus any unmatched captions before the next anchor
+        const members = [];
+        for(let i = Math.max(groupStart, g===0?0:anchorIdx); i<groupEnd; i++){
+          if(i===anchorIdx || (capTokensList[i].length && !matches[i])) members.push(i);
+        }
+        if(!members.length) members.push(anchorIdx);
+        const span = Math.max(0.2, segEndT - segStartT);
+        const weights = members.map(i => Math.max(1, capTokensList[i].length));
+        const wSum = weights.reduce((a,b)=>a+b,0);
+        members.forEach((i,k)=>{
+          const dur = Math.max(0.2, +(span * weights[k]/wSum).toFixed(2));
+          newDur[i] = dur;
+          const label = (captions[i]||'').trim();
+          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===anchorIdx });
+        });
+        groupStart = groupEnd;
+      }
+      // any captions before the first matched anchor (spoken before it, or just unmatched) —
+      // borrow proportionally from that first anchor's own span so they're not left stale
+      if(matchedIdxs[0] > 0){
+        const lead = [];
+        for(let i=0;i<matchedIdxs[0];i++) if(capTokensList[i].length) lead.push(i);
+        if(lead.length){
+          const anchor0 = matchedIdxs[0];
+          const total = newDur[anchor0] + lead.reduce((a,i)=>a+newDur[i],0);
+          const weights = [...lead, anchor0].map(i=>Math.max(1, capTokensList[i].length));
+          const wSum = weights.reduce((a,b)=>a+b,0);
+          [...lead, anchor0].forEach((i,k)=>{
+            newDur[i] = Math.max(0.2, +(total*weights[k]/wSum).toFixed(2));
+          });
         }
       }
 
@@ -1733,11 +1997,12 @@
         inp.value = showDur[+inp.dataset.i].toFixed(1);
       });
       drawPreviewFrame(0);
+      const missed = N - matchedIdxs.length - (N - capTokensList.filter(t=>t.length).length);
       syncStatus.style.color = '#8fd19e';
-      syncStatus.textContent = `Synced — ${words.length} words matched to captions.`;
+      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.`;
       syncBreakdown.style.display = 'block';
-      syncBreakdown.innerHTML = rows.map(r =>
-        `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:var(--green-bright);">${r.dur.toFixed(2)}s</span></div>`
+      syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
+        `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched?'var(--green-bright)':'#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched?'':' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
     } catch(err){
       console.error(err);
@@ -2031,6 +2296,25 @@
     setManifestStatus('No manifest.json in that selection — drop it (alone, or with images).', false);
   }
 
+  // Auto-detects the hook line and the card line inside a manifest's items so they don't
+  // have to be pulled out and pasted in by hand: the hook is the first item and has more
+  // than 5 words in it; the card line always starts with "Also comment" (quote optional).
+  // Whatever's left is the normal per-image caption set, matched to slots in order as before.
+  function splitManifestItems(items){
+    let hookItem = null, cardItem = null;
+    const rest = [];
+    items.forEach((item, idx)=>{
+      const text = (item.keyword || '').trim();
+      const isCard = !cardItem && /^also\s+comment\b/i.test(text);
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      const isHook = !hookItem && !isCard && idx === 0 && wordCount > 5;
+      if(isCard) cardItem = item;
+      else if(isHook) hookItem = item;
+      else rest.push(item);
+    });
+    return { hookItem, cardItem, rest };
+  }
+
   function applyManifest(items, imageFiles){
     // A manifest upload replaces the whole batch, not just the slots it
     // touches — otherwise old images/captions from a previous session
@@ -2041,6 +2325,17 @@
       captions[i] = '';
     }
     renderTray(); renderCaptions(); updateGenState(); refreshAll();
+
+    const { hookItem, cardItem, rest } = splitManifestItems(items);
+    if(hookItem){
+      hookCapText.value = hookItem.keyword || '';
+      hookCaptionText = hookCapText.value;
+    }
+    if(cardItem){
+      cardTextInput.value = cardItem.keyword || '';
+    }
+    drawPreviewFrame(previewT);
+    items = rest; // only the remaining items go through normal image-slot matching below
 
     const byExactName = {};
     const byStrippedName = {};
@@ -2093,7 +2388,8 @@
     function finish(){
       pendingManifestData = null;
       manifestImagesBtn.style.display = 'none';
-      setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
+      const extras = [hookItem?'hook':null, cardItem?'card':null].filter(Boolean).join(' + ');
+      setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (extras?' (auto-filled '+extras+')':'') + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
       computeAutoCardColor();
     }
   }
@@ -2328,6 +2624,8 @@
       capTextColor: { ...capTextColor },
       images: images.map(slot => slot ? slot.file : null), // File objects are Blobs — store directly
       audioFile: audioFile || null,
+      originalAudioFile: originalAudioFile || null,
+      voiceSpeed: +voiceSpeedRange.value || 1,
       bgMusicFile: bgMusicFile || null,
       bgMusicFileName: bgMusicFile ? (bgMusicFile.name || null) : null,
       bgMusicId: bgMusicId || null,
@@ -2341,6 +2639,7 @@
 
   async function applyTemplate(t){
     if(!t || typeof t !== 'object') throw new Error('not a valid template file');
+    stopAllAudio(); // stop whatever was playing (old video's music/voice) before swapping tracks
 
     hookDur = typeof t.hookDur === 'number' ? t.hookDur : hookDur;
     cardDur = typeof t.cardDur === 'number' ? t.cardDur : cardDur;
@@ -2429,19 +2728,27 @@
     // restore audio (mp3 Blob) if the template has one
     if(t.audioFile){
       audioFile = t.audioFile;
+      originalAudioFile = t.originalAudioFile || t.audioFile;
       audioDT.textContent = audioFile.name || 'Audio track';
       audioDS.textContent = 'Ready — mixed into the exported video';
       audioRemove.style.display = 'block';
       whisperBox.style.display = 'block';
+      voiceSpeedBox.style.display = 'block';
+      voiceSpeedRange.value = typeof t.voiceSpeed === 'number' ? t.voiceSpeed : 1;
+      voiceSpeedVal.textContent = (+voiceSpeedRange.value).toFixed(2) + 'x';
+      voiceSpeedResetBtn.style.display = (originalAudioFile !== audioFile) ? 'inline-block' : 'none';
+      voiceSpeedStatus.textContent = '';
       if(previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
       previewAudioUrl = URL.createObjectURL(audioFile);
       previewAudio.src = previewAudioUrl;
     } else {
       audioFile = null;
+      originalAudioFile = null;
       audioDT.textContent = 'Add MP3';
       audioDS.textContent = 'plays under the full video, muted after export finishes';
       audioRemove.style.display = 'none';
       whisperBox.style.display = 'none';
+      voiceSpeedBox.style.display = 'none';
       if(previewAudioUrl){ URL.revokeObjectURL(previewAudioUrl); previewAudioUrl = null; }
       previewAudio.removeAttribute('src'); previewAudio.load();
     }
@@ -2550,6 +2857,7 @@
       ...t,
       images: await Promise.all(t.images.map(file=> file ? blobToDataURL(file) : null)),
       audioFile: t.audioFile ? await blobToDataURL(t.audioFile) : null,
+      originalAudioFile: t.originalAudioFile ? await blobToDataURL(t.originalAudioFile) : null,
       bgMusicFile: t.bgMusicFile ? await blobToDataURL(t.bgMusicFile) : null
     };
     const blob = new Blob([JSON.stringify(packed)], {type:'application/json'});
@@ -2592,6 +2900,7 @@
           ? raw.images.map((d,i)=> d ? new File([dataURLToBlob(d)], `image-${i+1}.jpg`, {type: dataURLToBlob(d).type}) : null)
           : new Array(N).fill(null),
         audioFile: raw.audioFile ? new File([dataURLToBlob(raw.audioFile)], 'audio.mp3', {type: dataURLToBlob(raw.audioFile).type}) : null,
+        originalAudioFile: raw.originalAudioFile ? new File([dataURLToBlob(raw.originalAudioFile)], 'audio-original.mp3', {type: dataURLToBlob(raw.originalAudioFile).type}) : null,
         bgMusicFile: raw.bgMusicFile ? new File([dataURLToBlob(raw.bgMusicFile)], raw.bgMusicFileName || 'music.mp3', {type: dataURLToBlob(raw.bgMusicFile).type}) : null,
         bgMusicId: null // imported music isn't in this browser's music library yet — kept as an attached file only
       };
@@ -2716,6 +3025,7 @@
         const id = +el.dataset.play;
         const v = await idbGet('videos', id);
         if(!v) return;
+        stopAllAudio(); // don't let the editor's live preview music keep playing under this
         if(playerVideo.src) URL.revokeObjectURL(playerVideo.src);
         playerVideo.src = URL.createObjectURL(v.blob);
         playerVideo.muted = false;
@@ -3268,6 +3578,8 @@
   }
 
   bgMusicSelect.addEventListener('change', async ()=>{
+    musicPlayer.pause(); // never leave the previous track's audio running under the new one
+    bgMusicPreviewBtn.textContent = '▶';
     const val = bgMusicSelect.value;
     if(!val){ clearBgMusicSelection(); resetBgMusicTrim(); await saveTemplateToStorage(); return; }
     const m = await idbGet('music', +val);
@@ -3443,7 +3755,7 @@
   newVideoBtn.addEventListener('click', ()=>{
     if(images.some(Boolean) && !confirm('Start a new video? This clears the 10 loaded images, captions, and audio (your saved templates and gallery are unaffected).')) return;
 
-    stopPreview();
+    stopAllAudio();
     images.forEach(slot=>{ if(slot) URL.revokeObjectURL(slot.url); });
     images = new Array(N).fill(null);
     captions = new Array(N).fill('');
@@ -3660,6 +3972,8 @@
   playBtn.addEventListener('click', ()=>{
     if(loadedCount()<N) return;
     if(playing){ stopPreview(); return; }
+    playerVideo.pause(); // gallery preview player may still be running in the background
+    document.getElementById('voPlayer')?.pause();
     playing = true;
     playIcon.innerHTML = '<rect x="3" y="2.5" width="4" height="11" fill="currentColor"/><rect x="9" y="2.5" width="4" height="11" fill="currentColor"/>';
     playFrom = previewT >= totalDuration()-0.05 ? 0 : previewT;
