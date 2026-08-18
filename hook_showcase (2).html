@@ -2176,6 +2176,7 @@
   const manifestFolderBtn = document.getElementById('manifestFolderBtn');
   const manifestFolderInput = document.getElementById('manifestFolderInput');
   let pendingManifestData = null; // set when manifest.json arrived without its images
+  let pendingManifestRoot = null; // full parsed manifest object, for INTRO_CAPTION/CTA_CAPTION
 
   manifestInput.addEventListener('change', e=>{ receiveManifestDrop(e.target.files); manifestInput.value=''; });
   manifestFolderBtn.addEventListener('click', ()=> manifestFolderInput.click());
@@ -2239,7 +2240,7 @@
 
   manifestImagesBtn.addEventListener('click', ()=> manifestImagesInput.click());
   manifestImagesInput.addEventListener('change', e=>{
-    if(pendingManifestData && e.target.files.length) applyManifest(pendingManifestData, Array.from(e.target.files));
+    if(pendingManifestData && e.target.files.length) applyManifest(pendingManifestData, Array.from(e.target.files), pendingManifestRoot);
     manifestImagesInput.value = '';
   });
 
@@ -2279,9 +2280,10 @@
         if(imageFiles.length){
           pendingManifestData = null;
           manifestImagesBtn.style.display = 'none';
-          applyManifest(items, imageFiles);
+          applyManifest(items, imageFiles, data);
         } else {
           pendingManifestData = items;
+          pendingManifestRoot = data;
           manifestImagesBtn.style.display = 'block';
           setManifestStatus('manifest.json loaded (' + items.length + ' item' + (items.length===1?'':'s') + ') — now click below and select the ' + items.length + ' matching image' + (items.length===1?'':'s') + '.', true);
         }
@@ -2300,13 +2302,23 @@
     setManifestStatus('No manifest.json in that selection — drop it (alone, or with images).', false);
   }
 
-  // Auto-detects the hook line and the card line inside a manifest's items so they don't
-  // have to be pulled out and pasted in by hand: the hook is the first item and has more
-  // than 5 words in it; the card line always starts with "Also comment" (quote optional).
-  // Whatever's left is the normal per-image caption set, matched to slots in order as before.
-  function splitManifestItems(items){
+  // Hook line + card line source, in priority order:
+  //  1. explicit top-level INTRO_CAPTION / CTA_CAPTION fields on the manifest
+  //     (Pinterest Product Pack Grabber's newer output format)
+  //  2. fallback heuristic over items: hook is the first item with more than
+  //     5 words; card line always starts with "Also comment" (quote optional)
+  // Whatever's left is the normal per-image caption set, matched to slots in order.
+  function splitManifestItems(items, root){
     let hookItem = null, cardItem = null;
     const rest = [];
+
+    if(root && typeof root.INTRO_CAPTION === 'string' && root.INTRO_CAPTION.trim()){
+      hookItem = { keyword: root.INTRO_CAPTION.trim() };
+    }
+    if(root && typeof root.CTA_CAPTION === 'string' && root.CTA_CAPTION.trim()){
+      cardItem = { keyword: root.CTA_CAPTION.trim() };
+    }
+
     items.forEach((item, idx)=>{
       const text = (item.keyword || '').trim();
       const isCard = !cardItem && /^also\s+comment\b/i.test(text);
@@ -2319,7 +2331,7 @@
     return { hookItem, cardItem, rest };
   }
 
-  function applyManifest(items, imageFiles){
+  function applyManifest(items, imageFiles, root){
     // A manifest upload replaces the whole batch, not just the slots it
     // touches — otherwise old images/captions from a previous session
     // linger in the untouched slots.
@@ -2330,7 +2342,7 @@
     }
     renderTray(); renderCaptions(); updateGenState(); refreshAll();
 
-    const { hookItem, cardItem, rest } = splitManifestItems(items);
+    const { hookItem, cardItem, rest } = splitManifestItems(items, root);
     if(hookItem){
       hookCapText.value = hookItem.keyword || '';
       hookCaptionText = hookCapText.value;
