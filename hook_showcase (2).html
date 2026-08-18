@@ -2620,15 +2620,22 @@
       req.onerror = ()=>reject(req.error);
     });
   }
+  // in-memory cache: getAll() reads full blobs for every record, so
+  // repeated calls (every button click re-lists videos/voiceovers/music)
+  // were re-loading all media from disk each time. Cache per store, and
+  // only invalidate the store that actually changed.
+  const _idbAllCache = new Map();
   async function idbPut(storeName, value, key){
     const db = await openDB();
-    return new Promise((resolve,reject)=>{
+    const result = await new Promise((resolve,reject)=>{
       const tx = db.transaction(storeName,'readwrite');
       const store = tx.objectStore(storeName);
       const req = key!==undefined ? store.put(value,key) : store.put(value);
       req.onsuccess = ()=>resolve(req.result);
       req.onerror = ()=>reject(req.error);
     });
+    _idbAllCache.delete(storeName);
+    return result;
   }
   async function idbGet(storeName, key){
     const db = await openDB();
@@ -2640,22 +2647,26 @@
     });
   }
   async function idbGetAll(storeName){
+    if(_idbAllCache.has(storeName)) return _idbAllCache.get(storeName);
     const db = await openDB();
-    return new Promise((resolve,reject)=>{
+    const result = await new Promise((resolve,reject)=>{
       const tx = db.transaction(storeName,'readonly');
       const req = tx.objectStore(storeName).getAll();
       req.onsuccess = ()=>resolve(req.result || []);
       req.onerror = ()=>reject(req.error);
     });
+    _idbAllCache.set(storeName, result);
+    return result;
   }
   async function idbDelete(storeName, key){
     const db = await openDB();
-    return new Promise((resolve,reject)=>{
+    await new Promise((resolve,reject)=>{
       const tx = db.transaction(storeName,'readwrite');
       const req = tx.objectStore(storeName).delete(key);
       req.onsuccess = ()=>resolve();
       req.onerror = ()=>reject(req.error);
     });
+    _idbAllCache.delete(storeName);
   }
   async function idbGetAllKeys(storeName){
     const db = await openDB();
@@ -3073,7 +3084,7 @@
         const hasMusic = !!(v.template && v.template.bgMusicFile);
         row.innerHTML = `
           <div data-edit="${v.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;flex:1;min-width:0;" title="Open in editor">
-            <video src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="metadata"></video>
+            <video data-lazy-src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="none"></video>
             <div style="flex:1;min-width:0;">
               <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}${hasVoice ? ' <span style="color:var(--green-bright);" title="Voice-over attached">🔊</span>' : ''}${hasMusic ? ' <span style="color:var(--green-bright);" title="Background music attached">🎵</span>' : ''}</div>
               <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · tap to edit</div>
@@ -3085,6 +3096,25 @@
         `;
         container.appendChild(row);
       }
+    }
+
+    // lazy-load thumbnails: only set video src once a row scrolls into view,
+    // instead of decoding every video in the list up front
+    const lazyEls = container.querySelectorAll('[data-lazy-src]');
+    if('IntersectionObserver' in window && lazyEls.length){
+      const io = new IntersectionObserver((entries)=>{
+        entries.forEach(entry=>{
+          if(entry.isIntersecting){
+            const el = entry.target;
+            el.src = el.dataset.lazySrc;
+            el.removeAttribute('data-lazy-src');
+            io.unobserve(el);
+          }
+        });
+      }, { root: container, rootMargin: '200px' });
+      lazyEls.forEach(el=>io.observe(el));
+    } else {
+      lazyEls.forEach(el=>{ el.src = el.dataset.lazySrc; el.removeAttribute('data-lazy-src'); });
     }
 
     container.querySelectorAll('[data-play]').forEach(el=>{
@@ -3135,14 +3165,22 @@
       });
     });
   }
+  let galleryModalDirty = true;
   async function refreshAllGalleries(){
     const all = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
 
     galleryEmpty.style.display = all.length ? 'none' : 'block';
     renderGalleryRows(videoGallery, all, galleryObjectUrls);
 
-    galleryModalEmpty.style.display = all.length ? 'none' : 'block';
-    renderGalleryRows(videoGalleryModal, all, modalGalleryObjectUrls);
+    // the modal gallery is hidden most of the time — don't pay the cost of
+    // creating object URLs and DOM rows for it until it's actually opened
+    if(galleryModalOverlay.classList.contains('on')){
+      galleryModalEmpty.style.display = all.length ? 'none' : 'block';
+      renderGalleryRows(videoGalleryModal, all, modalGalleryObjectUrls);
+      galleryModalDirty = false;
+    } else {
+      galleryModalDirty = true;
+    }
 
     if(all.length){ qbGalleryCount.textContent = all.length; qbGalleryCount.style.display = 'inline-block'; }
     else { qbGalleryCount.style.display = 'none'; }
@@ -3150,7 +3188,15 @@
   const renderGallery = refreshAllGalleries; // back-compat alias
   refreshAllGalleries();
 
-  openGalleryBtn.addEventListener('click', ()=>{ galleryModalOverlay.classList.add('on'); });
+  openGalleryBtn.addEventListener('click', async ()=>{
+    galleryModalOverlay.classList.add('on');
+    if(galleryModalDirty){
+      const all = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
+      galleryModalEmpty.style.display = all.length ? 'none' : 'block';
+      renderGalleryRows(videoGalleryModal, all, modalGalleryObjectUrls);
+      galleryModalDirty = false;
+    }
+  });
   galleryModalClose.addEventListener('click', ()=>{ galleryModalOverlay.classList.remove('on'); });
   galleryModalOverlay.addEventListener('click', e=>{ if(e.target === galleryModalOverlay) galleryModalOverlay.classList.remove('on'); });
 
