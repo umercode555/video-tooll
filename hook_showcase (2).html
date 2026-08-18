@@ -1951,59 +1951,62 @@
       if(!matchedIdxs.length) throw new Error('Could not match any caption text to the voice-over — check the captions match what\'s actually said.');
 
       // pass 2 — turn matched anchor points into a full per-image duration timeline.
-      // A matched caption's segment runs from where its speech starts to where the NEXT
-      // matched caption's speech starts (no dead-air gap between images); any caption(s)
-      // between two anchors that couldn't be matched share that gap, weighted by their
-      // own word count, so nothing collapses to zero and the sequence stays intact.
+      // Whisper's word timestamps are ABSOLUTE audio time (t=0 = start of the mp3), and
+      // the preview/export plays that same mp3 from t=0 against the FULL timeline: hook
+      // flashes first, then images, with the card slotted in wherever it's positioned.
+      // A caption's real on-screen target isn't its raw whisper timestamp — it's that
+      // timestamp minus whatever fixed, non-caption screen time (hook flashes, and the
+      // card if it sits before it) plays before it. Ignoring that offset is exactly what
+      // made images run early/late before. This solves for the exact absolute time at
+      // every matched anchor and only estimates the gaps in between (unmatched captions),
+      // weighted by word count, instead of quietly ignoring the hook/card offset.
+      const fixedOffsetBefore = (i) => N*hookDur + (cardPos <= i ? cardDur : 0); // i in [0..N]
+      const cardBetween = (a,b) => (cardPos > a && cardPos <= b) ? cardDur : 0;
+
+      // boundaries: a virtual start (t = however long hook/card play before image 0),
+      // every matched caption (t = its own detected speech start), and a virtual end
+      // (t = end of the audio). Consecutive boundaries bound one "group" of images.
+      const boundaries = [{ idx: 0, t: fixedOffsetBefore(0), real: false }];
+      for(const i of matchedIdxs) boundaries.push({ idx: i, t: matches[i].start, real: true });
+      boundaries.push({ idx: N, t: totalDur, real: false });
+
       const newDur = showDur.slice();
       const rows = [];
-      let groupStart = 0; // caption index
-      for(let g=0; g<matchedIdxs.length; g++){
-        const anchorIdx = matchedIdxs[g];
-        const segStartT = matches[anchorIdx].start;
-        const segEndT = (g+1<matchedIdxs.length) ? matches[matchedIdxs[g+1]].start : totalDur;
-        const groupEnd = (g+1<matchedIdxs.length) ? matchedIdxs[g+1] : N; // exclusive
-        // members of this group: the anchor itself plus any unmatched captions before the next anchor
+      let clampedGaps = 0;
+      for(let b=0; b<boundaries.length-1; b++){
+        const A = boundaries[b], B = boundaries[b+1];
+        // members of this group: A's own anchor caption (if A is a real matched anchor)
+        // plus any unmatched captions between A and the next anchor B
         const members = [];
-        for(let i = Math.max(groupStart, g===0?0:anchorIdx); i<groupEnd; i++){
-          if(i===anchorIdx || (capTokensList[i].length && !matches[i])) members.push(i);
+        for(let i=A.idx; i<B.idx; i++){
+          if((i===A.idx && A.real) || (capTokensList[i].length && !matches[i])) members.push(i);
         }
-        if(!members.length) members.push(anchorIdx);
-        const span = Math.max(0.2, segEndT - segStartT);
+        if(!members.length) continue;
+        // subtract any fixed hook/card time that falls inside this window — that time is
+        // real screen time but isn't attributable to any of these captions' durations
+        const rawSpan = (B.t - A.t) - cardBetween(A.idx, B.idx);
+        const minSpan = 0.2 * members.length;
+        const span = Math.max(minSpan, rawSpan);
+        if(rawSpan < minSpan) clampedGaps++;
         const weights = members.map(i => Math.max(1, capTokensList[i].length));
         const wSum = weights.reduce((a,b)=>a+b,0);
         members.forEach((i,k)=>{
           const dur = Math.max(0.2, +(span * weights[k]/wSum).toFixed(2));
           newDur[i] = dur;
           const label = (captions[i]||'').trim();
-          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===anchorIdx });
+          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real });
         });
-        groupStart = groupEnd;
       }
-      // any captions before the first matched anchor (spoken before it, or just unmatched) —
-      // borrow proportionally from that first anchor's own span so they're not left stale
-      if(matchedIdxs[0] > 0){
-        const lead = [];
-        for(let i=0;i<matchedIdxs[0];i++) if(capTokensList[i].length) lead.push(i);
-        if(lead.length){
-          const anchor0 = matchedIdxs[0];
-          const total = newDur[anchor0] + lead.reduce((a,i)=>a+newDur[i],0);
-          const weights = [...lead, anchor0].map(i=>Math.max(1, capTokensList[i].length));
-          const wSum = weights.reduce((a,b)=>a+b,0);
-          [...lead, anchor0].forEach((i,k)=>{
-            newDur[i] = Math.max(0.2, +(total*weights[k]/wSum).toFixed(2));
-          });
-        }
-      }
+
 
       showDur = newDur;
       capList.querySelectorAll('.capDur').forEach(inp=>{
         inp.value = showDur[+inp.dataset.i].toFixed(1);
       });
       drawPreviewFrame(0);
-      const missed = N - matchedIdxs.length - (N - capTokensList.filter(t=>t.length).length);
-      syncStatus.style.color = '#8fd19e';
-      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.`;
+      const missed = capTokensList.filter(t=>t.length).length - matchedIdxs.length;
+      syncStatus.style.color = clampedGaps>0 ? '#e0a94a' : '#8fd19e';
+      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
       syncBreakdown.style.display = 'block';
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched?'var(--green-bright)':'#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched?'':' <span style="opacity:.6;">(estimated)</span>'}</div>`
