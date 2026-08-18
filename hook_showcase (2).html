@@ -780,6 +780,10 @@
       <div id="manifestStatus" style="font-size:9.5px;margin-bottom:10px;min-height:12px;"></div>
       <button type="button" id="manifestImagesBtn" style="display:none;width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:10px;">Select the matching images</button>
 
+      <button type="button" id="findMatchBtn" style="width:100%;background:#1c2118;color:var(--green-bright);border:1px solid var(--green-bright);border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">🔎 Find matching MP3</button>
+      <div id="findMatchStatus" style="font-size:9.5px;margin-bottom:6px;min-height:12px;"></div>
+      <div id="findMatchResult" style="display:none;font-size:9.5px;color:rgba(242,240,230,0.7);margin-bottom:10px;line-height:1.5;"></div>
+
       <label for="fileInput" class="drop" id="dropZone">
         <input type="file" id="fileInput" accept="image/*" multiple>
         <div class="dt">Drop or select images</div>
@@ -2396,6 +2400,70 @@
   ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
   ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
   dropZone.addEventListener('drop', e=>{ if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+
+  // ---------- "Find matching MP3" button ----------
+  // Compares this video's Hook Caption + Caption 1-10 (in order) against every
+  // already-transcribed voice-over in the library. No re-transcription — reuses
+  // scoreTranscriptAgainstVideo, which weighs coverage + product order. 80%+
+  // confidence auto-applies; below that, shows the best guess for manual pick.
+  const findMatchBtn = document.getElementById('findMatchBtn');
+  const findMatchStatus = document.getElementById('findMatchStatus');
+  const findMatchResult = document.getElementById('findMatchResult');
+  const FIND_MATCH_AUTO_THRESHOLD = 0.8;
+
+  function setFindMatchStatus(msg, ok){
+    findMatchStatus.style.color = ok ? 'var(--green-bright)' : '#e0a84a';
+    findMatchStatus.textContent = msg;
+  }
+
+  findMatchBtn.addEventListener('click', async ()=>{
+    findMatchBtn.disabled = true;
+    findMatchResult.style.display = 'none';
+    setFindMatchStatus('Starting…', true);
+    await sleep(250);
+
+    const capsForMatch = [hookCaptionText, ...captions];
+    if(!capsForMatch.some(c=>c && c.trim())){
+      setFindMatchStatus('Add captions first — nothing to match against yet.', false);
+      findMatchBtn.disabled = false;
+      return;
+    }
+
+    setFindMatchStatus('Finding the closest voice-over…', true);
+    await sleep(200);
+
+    const voiceovers = (await idbGetAll('voiceovers')).filter(v => v.status === 'done' && v.transcript);
+    if(!voiceovers.length){
+      setFindMatchStatus('No transcribed MP3s yet — add & transcribe some in the Voice-over library first.', false);
+      findMatchBtn.disabled = false;
+      return;
+    }
+
+    let best = null;
+    for(const vo of voiceovers){
+      const { confidence } = scoreTranscriptAgainstVideo(vo.transcript, capsForMatch);
+      if(!best || confidence > best.confidence) best = { vo, confidence };
+    }
+
+    if(best && best.confidence >= FIND_MATCH_AUTO_THRESHOLD){
+      await assignVoiceoverToVideo(best.vo.id, CURRENT_EDITOR_KEY);
+      setFindMatchStatus(`Found it — "${best.vo.name}" (${Math.round(best.confidence*100)}% match) — applied.`, true);
+      findMatchResult.style.display = 'block';
+      findMatchResult.innerHTML = `Wrong MP3? Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> and pick a different one from the dropdown — takes one click.`;
+    } else if(best && best.confidence > 0){
+      setFindMatchStatus(`Best guess: "${best.vo.name}" (${Math.round(best.confidence*100)}%) — below 80%, not auto-applied.`, false);
+      findMatchResult.style.display = 'block';
+      findMatchResult.innerHTML = `Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> to review it or assign a different MP3 manually.`;
+    } else {
+      setFindMatchStatus('No matching voice-over found among the transcribed MP3s.', false);
+      findMatchResult.style.display = 'block';
+      findMatchResult.innerHTML = `Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> to assign one manually.`;
+    }
+    const link = document.getElementById('findMatchReplaceLink');
+    if(link) link.addEventListener('click', e=>{ e.preventDefault(); openVoiceLibBtn.click(); });
+
+    findMatchBtn.disabled = false;
+  });
 
   function renderTray(){
     tray.innerHTML = '';
