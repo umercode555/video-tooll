@@ -1928,9 +1928,20 @@
     syncStatus.style.color = '';
     syncStatus.textContent = 'Transcribing with Whisper…';
     try{
-      const data = await transcribeWithGroq(audioFile, apiKey);
-      const words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
+      // Transcribe the ORIGINAL, un-stretched upload whenever one exists — WSOLA time-stretch
+      // (used by the speed changer) can smear consonants enough to hurt Whisper's accuracy at
+      // higher speeds, which is what was causing barely any captions to match once sped up.
+      // The original always transcribes cleanest; we just rescale its word timestamps onto the
+      // sped-up file's shorter timeline afterward, so speed never affects alignment quality.
+      const speedFactor = +voiceSpeedRange.value || 1;
+      const useOriginalForTranscription = originalAudioFile && Math.abs(speedFactor-1) > 0.005;
+      const data = await transcribeWithGroq(useOriginalForTranscription ? originalAudioFile : audioFile, apiKey);
+      let words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
       if(!words || !words.length) throw new Error('No word timestamps returned.');
+      if(useOriginalForTranscription){
+        // original was transcribed at 1x; map every timestamp onto the sped-up file's timeline
+        words = words.map(w => ({...w, start: w.start/speedFactor, end: w.end/speedFactor}));
+      }
       const totalDur = words[words.length-1].end;
 
       // pass 1 — force-align each caption's own text to where it's actually spoken
@@ -1944,6 +1955,21 @@
         if(idxs){
           matches[i] = { start: words[idxs[0]].start, end: words[idxs[idxs.length-1]].end, hitCount: idxs.length, tokCount: toks.length };
           pointer = idxs[idxs.length-1] + 1;
+        }
+      }
+
+      // Reject "false positive" anchors: a real spoken caption needs a sane minimum amount of
+      // audio per word (real speech, even fast, rarely drops below ~0.12s/word). If a matched
+      // anchor implies less time than that for its own words, it's almost certainly a stray fuzzy
+      // match landing on the wrong word — treating it as a hard boundary was what compressed every
+      // caption after it down to the 0.20s floor. Demote it back to "unmatched" so pass 2 estimates
+      // it from surrounding timing instead of trusting a bad timestamp.
+      const MIN_SEC_PER_WORD = 0.12;
+      for(let i=0;i<N;i++){
+        const m = matches[i];
+        if(!m) continue;
+        if((m.end - m.start) < MIN_SEC_PER_WORD * Math.max(1, m.tokCount) * 0.5){
+          matches[i] = null;
         }
       }
 
@@ -1998,6 +2024,15 @@
         });
       }
 
+
+      // Safety net: the mp3 is the master timeline — the image/caption timeline must never end
+      // before the audio does. If rounding or a fully-unmatched tail still leaves the visual
+      // timeline short of totalDur, stretch the last caption so the audio is never cut off.
+      const coveredEnd = fixedOffsetBefore(N) + newDur.reduce((a,b)=>a+b,0);
+      if(coveredEnd < totalDur - 0.05){
+        const lastIdx = newDur.length - 1;
+        newDur[lastIdx] = +(newDur[lastIdx] + (totalDur - coveredEnd)).toFixed(2);
+      }
 
       showDur = newDur;
       capList.querySelectorAll('.capDur').forEach(inp=>{
