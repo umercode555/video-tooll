@@ -3826,18 +3826,24 @@
     bgMusicSelect.value = bgMusicId ? String(bgMusicId) : '';
   }
 
+  let bgMusicSelectionPending = null; // promise for the in-flight change handler, so exports never race a fresh pick
   bgMusicSelect.addEventListener('change', async ()=>{
     musicPlayer.pause(); // never leave the previous track's audio running under the new one
     bgMusicPreviewBtn.textContent = '▶';
     const val = bgMusicSelect.value;
-    if(!val){ clearBgMusicSelection(); resetBgMusicTrim(); await saveTemplateToStorage(); return; }
-    const m = await idbGet('music', +val);
-    if(!m){ clearBgMusicSelection(); return; }
-    bgMusicId = m.id;
-    bgMusicFile = m.blob;
-    bgMusicTrimStart = 0; bgMusicTrimEnd = null;
-    await loadBgMusicDuration();
-    await saveTemplateToStorage();
+    const task = (async ()=>{
+      if(!val){ clearBgMusicSelection(); resetBgMusicTrim(); await saveTemplateToStorage(); return; }
+      const m = await idbGet('music', +val);
+      if(!m){ clearBgMusicSelection(); return; }
+      bgMusicId = m.id;
+      bgMusicFile = m.blob;
+      bgMusicTrimStart = 0; bgMusicTrimEnd = null;
+      await loadBgMusicDuration();
+      await saveTemplateToStorage();
+    })();
+    bgMusicSelectionPending = task;
+    await task;
+    if(bgMusicSelectionPending === task) bgMusicSelectionPending = null;
   });
 
   // ---------- trim: reads the real duration once, drives a dual-handle slider ----------
@@ -4251,16 +4257,19 @@
     const winLen = Math.max(0.1, (winEnd||0.1) - winStart);
     return winStart + (videoT % winLen);
   }
+  let musicPlayerLoadedFile = null; // which Blob is actually loaded into musicPlayer right now
   function playBgMusicLive(fromVideoT){
     if(!bgMusicFile) return;
-    if(musicPlayer.src && musicPlayer.dataset.playingId !== 'video-mix'){
+    const trackChanged = musicPlayerLoadedFile !== bgMusicFile;
+    if(musicPlayer.src && (musicPlayer.dataset.playingId !== 'video-mix' || trackChanged)){
       musicPlayer.pause();
       if(musicPlayer.src) URL.revokeObjectURL(musicPlayer.src);
       musicPlayer.src = '';
     }
-    if(musicPlayer.dataset.playingId !== 'video-mix' || !musicPlayer.src){
+    if(musicPlayer.dataset.playingId !== 'video-mix' || !musicPlayer.src || trackChanged){
       musicPlayer.src = URL.createObjectURL(bgMusicFile);
       musicPlayer.dataset.playingId = 'video-mix';
+      musicPlayerLoadedFile = bgMusicFile;
     }
     musicPlayer.volume = bgMusicVolume;
     musicPlayer.loop = false; // looping is handled inside the trim window via timeupdate
@@ -4617,6 +4626,18 @@
   genBtn.addEventListener('click', async ()=>{
     if(loadedCount()<N) return;
     stopPreview();
+    // If a music-track switch is still resolving (id lookup + duration probe),
+    // wait for it — otherwise export can grab the previous track's blob.
+    if(bgMusicSelectionPending) await bgMusicSelectionPending;
+    // Belt-and-suspenders: re-fetch the selected track fresh from storage right
+    // before export, so the exported audio always matches the dropdown, never
+    // a stale in-memory blob from an earlier selection.
+    if(bgMusicId != null){
+      try{
+        const fresh = await idbGet('music', bgMusicId);
+        if(fresh) bgMusicFile = fresh.blob;
+      } catch(e){ /* fall back to whatever bgMusicFile already holds */ }
+    }
     genBtn.disabled = true;
     genBar.classList.add('on');
     genStatus.style.display = 'flex';
