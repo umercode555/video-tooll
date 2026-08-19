@@ -6,7 +6,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@700;800;900&display=swap" rel="stylesheet">
+<!-- Loaded non-render-blocking: a plain <link rel="stylesheet"> here would hold the
+     ENTIRE page unpainted — not just the font, everything, including the static top
+     bar — until fonts.googleapis.com responds. On a slow/flaky connection that's a
+     real, multi-second black screen with zero relation to any app code. preload +
+     swap-on-load lets the browser paint the real layout immediately with a fallback
+     font, then swap League Spartan in the moment it's ready. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@700;800;900&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@700;800;900&display=swap" rel="stylesheet"></noscript>
 <style>
   :root{
     --ink:#050806;
@@ -1511,7 +1518,7 @@
     updateSwatch();
     drawPreviewFrame(previewT);
   });
-  cardAlphaRange.addEventListener('change', ()=> saveTemplateToStorage());
+  cardAlphaRange.addEventListener('change', ()=> saveTemplateToStorageDebounced());
   cardColorSwatch.addEventListener('click', ()=>{
     const opening = cardColorPicker.style.display === 'none';
     cardColorPicker.style.display = opening ? 'block' : 'none';
@@ -1550,8 +1557,8 @@
     if(mode==='image') renderCardBgThumbs();
     drawPreviewFrame(previewT);
   }
-  cardBgModeColorBtn.addEventListener('click', ()=> { setCardBgMode('color'); saveTemplateToStorage(); });
-  cardBgModeImageBtn.addEventListener('click', ()=> { setCardBgMode('image'); saveTemplateToStorage(); });
+  cardBgModeColorBtn.addEventListener('click', ()=> { setCardBgMode('color'); saveTemplateToStorageDebounced(); });
+  cardBgModeImageBtn.addEventListener('click', ()=> { setCardBgMode('image'); saveTemplateToStorageDebounced(); });
   setCardBgMode('color');
 
   function renderCardBgThumbs(){
@@ -1570,13 +1577,13 @@
           if(cardBgImageIdx === 'custom') cardBgImageIdx = null;
           renderCardBgThumbs();
           drawPreviewFrame(previewT);
-          saveTemplateToStorage();
+          saveTemplateToStorageDebounced();
           return;
         }
         cardBgImageIdx = 'custom';
         renderCardBgThumbs();
         drawPreviewFrame(previewT);
-        saveTemplateToStorage();
+        saveTemplateToStorageDebounced();
       });
       cardBgThumbs.appendChild(b);
     }
@@ -1591,7 +1598,7 @@
         cardBgImageIdx = idx;
         renderCardBgThumbs();
         drawPreviewFrame(previewT);
-        saveTemplateToStorage();
+        saveTemplateToStorageDebounced();
       });
       cardBgThumbs.appendChild(b);
     });
@@ -1608,7 +1615,7 @@
         cardBgImageIdx = 'custom';
         renderCardBgThumbs();
         drawPreviewFrame(previewT);
-        saveTemplateToStorage();
+        saveTemplateToStorageDebounced();
       };
       img.src = url;
     }
@@ -2723,25 +2730,90 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 3;
+  const IDB_VERSION = 4;
+  // ---------- schema note ----------
+  // v3 stored the blob (mp4/mp3) INSIDE the same record as its metadata (name, date,
+  // transcript, template…). Every list screen — gallery, voice-over library, music
+  // library — just needs the metadata to draw its rows, but idbGetAll() had no way to
+  // fetch metadata without also structured-cloning every blob in the store. Worse,
+  // each saved video's `template` field itself embeds the full project — all 10
+  // source images, the voice-over mp3, the background-music track — so every saved
+  // video weighed as much as the whole editor session that made it. With a real
+  // library's worth of videos that's a lot of MB deserialized on every page load and
+  // every list refresh — that's the black-screen stall and the slow-to-populate UI.
+  // v4 splits each store in two, and splits the video template out a third way:
+  //  - 'videos' / 'voiceovers' / 'music' hold ONLY small metadata (fast to list):
+  //    name, date, status, and — for videos — captions/hasVoice/hasMusic (enough
+  //    for display and for voice-over auto-matching without touching a single blob).
+  //  - 'videoBlobs' / 'voiceoverBlobs' / 'musicBlobs' hold the actual Blob, keyed by
+  //    the same id, fetched only when a specific item is played/exported/downloaded.
+  //  - 'videoTemplates' holds each saved video's full project (images/audio/music),
+  //    fetched only when that exact video is reopened in the editor.
+  // The upgrade below migrates every existing record in place — nothing is dropped.
+  const BLOB_STORE = { videos:'videoBlobs', voiceovers:'voiceoverBlobs', music:'musicBlobs' };
+  let _dbConn = null; // cache one open connection instead of reopening per call — reopening
+  // indexedDB per get/put adds a connection round-trip on every single operation, and on
+  // heavy pages (lots of stores, big blobs) that round-trip is a real, repeated stall.
   function openDB(){
+    if(_dbConn) return Promise.resolve(_dbConn);
     return new Promise((resolve,reject)=>{
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-      req.onupgradeneeded = ()=>{
+      req.onupgradeneeded = (ev)=>{
         const db = req.result;
+        const tx = req.transaction;
         if(!db.objectStoreNames.contains('templates')) db.createObjectStore('templates');
         if(!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath:'id', autoIncrement:true });
         if(!db.objectStoreNames.contains('voiceovers')) db.createObjectStore('voiceovers', { keyPath:'id', autoIncrement:true });
         if(!db.objectStoreNames.contains('music')) db.createObjectStore('music', { keyPath:'id', autoIncrement:true });
+        if(!db.objectStoreNames.contains('videoBlobs')) db.createObjectStore('videoBlobs', { keyPath:'id' });
+        if(!db.objectStoreNames.contains('voiceoverBlobs')) db.createObjectStore('voiceoverBlobs', { keyPath:'id' });
+        if(!db.objectStoreNames.contains('musicBlobs')) db.createObjectStore('musicBlobs', { keyPath:'id' });
+        if(!db.objectStoreNames.contains('videoTemplates')) db.createObjectStore('videoTemplates', { keyPath:'id' });
+        if(ev.oldVersion > 0 && ev.oldVersion < 4){
+          // migrate: pull the inline blob out of each existing record, into its new
+          // sibling store, leaving lightweight metadata behind in the original store.
+          for(const [metaStore, blobStore] of Object.entries(BLOB_STORE)){
+            tx.objectStore(metaStore).openCursor().onsuccess = (e)=>{
+              const cursor = e.target.result;
+              if(!cursor) return;
+              const rec = cursor.value;
+              let meta = rec;
+              if(rec && rec.blob){
+                tx.objectStore(blobStore).put({ id: rec.id, blob: rec.blob });
+                const { blob, ...rest } = rec;
+                meta = rest;
+              }
+              // videos additionally carry a full project `template` inline — pull
+              // that out too, leaving just captions + presence flags for listing.
+              if(metaStore === 'videos' && meta && meta.template){
+                tx.objectStore('videoTemplates').put({ id: meta.id, template: meta.template });
+                const t = meta.template;
+                const { template, ...rest } = meta;
+                meta = {
+                  ...rest,
+                  captions: Array.isArray(t.captions) ? t.captions.slice() : [],
+                  hasVoice: !!t.audioFile,
+                  hasMusic: !!t.bgMusicFile
+                };
+              }
+              if(meta !== rec) cursor.update(meta);
+              cursor.continue();
+            };
+          }
+        }
       };
-      req.onsuccess = ()=>resolve(req.result);
+      req.onsuccess = ()=>{
+        _dbConn = req.result;
+        _dbConn.onclose = ()=>{ _dbConn = null; }; // browser can drop it (e.g. another tab upgrading); reopen next call
+        resolve(_dbConn);
+      };
       req.onerror = ()=>reject(req.error);
     });
   }
-  // in-memory cache: getAll() reads full blobs for every record, so
-  // repeated calls (every button click re-lists videos/voiceovers/music)
-  // were re-loading all media from disk each time. Cache per store, and
-  // only invalidate the store that actually changed.
+  // in-memory cache: getAll() reads every record for a store, so repeated calls
+  // (every button click re-lists videos/voiceovers/music) were re-hitting disk each
+  // time. Cache per store, and only invalidate the store that actually changed.
+  // Now that blobs live in a separate store, this cache is cheap even for big libraries.
   const _idbAllCache = new Map();
   async function idbPut(storeName, value, key){
     const db = await openDB();
@@ -2794,6 +2866,43 @@
       req.onsuccess = ()=>resolve(req.result || []);
       req.onerror = ()=>reject(req.error);
     });
+  }
+  // ---------- blob helpers (new in v4 split) ----------
+  // Fetch the actual Blob for one video/voiceover/music record, only when something
+  // is about to actually use it (play, edit, export, download) — never as a side
+  // effect of just listing items on screen.
+  async function idbGetBlob(metaStoreName, id){
+    if(id==null) return null;
+    const rec = await idbGet(BLOB_STORE[metaStoreName], id);
+    return rec ? rec.blob : null;
+  }
+  async function idbPutBlob(metaStoreName, id, blob){
+    return idbPut(BLOB_STORE[metaStoreName], { id, blob });
+  }
+  async function idbDeleteBlob(metaStoreName, id){
+    return idbDelete(BLOB_STORE[metaStoreName], id);
+  }
+  // Convenience: metadata record + its blob merged into one object, for the few
+  // call sites that genuinely need both together (kept explicit/opt-in so nothing
+  // accidentally goes back to loading every blob at once).
+  async function idbGetWithBlob(metaStoreName, id){
+    const [meta, blob] = await Promise.all([ idbGet(metaStoreName, id), idbGetBlob(metaStoreName, id) ]);
+    if(!meta) return null;
+    return { ...meta, blob };
+  }
+  // ---------- video template store (new in v4 split) ----------
+  // A saved video's full project (10 images, voice-over, background music) lives
+  // here, keyed by the video's id — fetched only when that specific video is
+  // reopened in the editor, never as a side effect of listing the gallery.
+  async function idbGetVideoTemplate(id){
+    const rec = await idbGet('videoTemplates', id);
+    return rec ? rec.template : null;
+  }
+  async function idbPutVideoTemplate(id, template){
+    return idbPut('videoTemplates', { id, template });
+  }
+  async function idbDeleteVideoTemplate(id){
+    return idbDelete('videoTemplates', id);
   }
 
   // ---------- template save / load ----------
@@ -2992,6 +3101,20 @@
       return true;
     } catch(err){ console.error('template save failed', err); return false; }
   }
+  // saveTemplateToStorage clones every loaded image/mp3/music Blob into IndexedDB.
+  // Firing it straight off every slider/toggle event was the main stiffness source:
+  // a big clone job landing on the main thread back-to-back with UI events. Debounce
+  // collapses bursts (slider drags, rapid clicks) into one write, and the write itself
+  // is scheduled on an idle slice so it doesn't compete with the current interaction.
+  let _saveTplTimer = null;
+  function saveTemplateToStorageDebounced(delay){
+    clearTimeout(_saveTplTimer);
+    _saveTplTimer = setTimeout(()=>{
+      const run = ()=> saveTemplateToStorage();
+      if('requestIdleCallback' in window) requestIdleCallback(run, {timeout:1500});
+      else run();
+    }, delay || 400);
+  }
 
   function showTmplStatus(msg, isError){
     tmplStatus.textContent = msg;
@@ -3129,6 +3252,7 @@
     try{
       const t = await idbGet('templates', TEMPLATE_KEY);
       if(!t) return;
+      showTmplStatus('Restoring your last project…');
       await applyTemplate(t);
       showTmplStatus('Restored your last saved template.');
     } catch(err){ console.error('template auto-restore failed', err); }
@@ -3152,7 +3276,17 @@
   async function saveVideoToGallery(blob){
     const name = await nextVideoName();
     const template = await collectTemplate().catch(()=>null);
-    const id = await idbPut('videos', { name, blob, createdAt: Date.now(), template, voiceoverId: currentEditorVoiceoverId || null });
+    // 'videos' record stays light — captions + presence flags only, no image/audio
+    // Blobs — so listing the gallery never has to touch a video's full project.
+    const id = await idbPut('videos', {
+      name, createdAt: Date.now(),
+      voiceoverId: currentEditorVoiceoverId || null,
+      captions: (template && Array.isArray(template.captions)) ? template.captions.slice() : [],
+      hasVoice: !!(template && template.audioFile),
+      hasMusic: !!(template && template.bgMusicFile)
+    });
+    await idbPutBlob('videos', id, blob); // rendered mp4 — see v4 schema note above
+    if(template) await idbPutVideoTemplate(id, template); // full project — same
     // if a voiceover was attached while this video was still unsaved (via the
     // "current editor" option in the Voice-over library), point it at the
     // now-real video id instead of the placeholder session marker
@@ -3204,57 +3338,64 @@
       container.appendChild(header);
 
       for(const v of g.items){
-        const url = URL.createObjectURL(v.blob);
-        urlsRef.push(url);
+        // no object URL here — v is metadata only now (see v4 schema note). The
+        // actual mp4 Blob is fetched lazily below, only for rows that get played,
+        // scrolled into view, or downloaded — never all of them up front.
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px;flex-wrap:wrap;';
         const dt = new Date(v.createdAt);
-        const hasVoice = !!(v.template && v.template.audioFile);
-        const hasMusic = !!(v.template && v.template.bgMusicFile);
+        const hasVoice = !!v.hasVoice;
+        const hasMusic = !!v.hasMusic;
         row.innerHTML = `
           <div data-edit="${v.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;flex:1;min-width:0;" title="Open in editor">
-            <video data-lazy-src="${url}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="none"></video>
+            <video data-lazy-id="${v.id}" muted style="width:40px;height:71px;object-fit:cover;border-radius:3px;background:#000;pointer-events:none;" preload="none"></video>
             <div style="flex:1;min-width:0;">
               <div style="font-family:var(--mono);font-size:11px;color:var(--paper);">${v.name}${hasVoice ? ' <span style="color:var(--green-bright);" title="Voice-over attached">🔊</span>' : ''}${hasMusic ? ' <span style="color:var(--green-bright);" title="Background music attached">🎵</span>' : ''}</div>
               <div style="font-size:9px;color:rgba(242,240,230,0.45);">${dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · tap to edit</div>
             </div>
           </div>
           <button type="button" class="align-btn" data-play="${v.id}" style="padding:6px 8px;" title="Preview">▶</button>
-          <a href="${url}" download="${v.name.replace(/\s+/g,'-').toLowerCase()}.mp4" class="align-btn" style="text-decoration:none;padding:6px 8px;">Download</a>
+          <button type="button" class="align-btn" data-dl="${v.id}" data-dlname="${v.name.replace(/\s+/g,'-').toLowerCase()}.mp4" style="padding:6px 8px;">Download</button>
           <button type="button" class="align-btn" data-del="${v.id}" style="padding:6px 8px;">Delete</button>
         `;
         container.appendChild(row);
       }
     }
 
-    // lazy-load thumbnails: only set video src once a row scrolls into view,
-    // instead of decoding every video in the list up front
-    const lazyEls = container.querySelectorAll('[data-lazy-src]');
+    // lazy-load thumbnails: only fetch a row's video Blob (and decode it) once the
+    // row actually scrolls into view, instead of pulling every video in the list
+    // into memory up front — this is the main fix for the multi-second freeze on
+    // a gallery with a real number of saved videos.
+    const lazyEls = container.querySelectorAll('[data-lazy-id]');
+    const loadThumb = async (el)=>{
+      const id = +el.dataset.lazyId;
+      el.removeAttribute('data-lazy-id');
+      const blob = await idbGetBlob('videos', id).catch(()=>null);
+      if(!blob) return;
+      const url = URL.createObjectURL(blob);
+      urlsRef.push(url);
+      el.src = url;
+    };
     if('IntersectionObserver' in window && lazyEls.length){
       const io = new IntersectionObserver((entries)=>{
         entries.forEach(entry=>{
-          if(entry.isIntersecting){
-            const el = entry.target;
-            el.src = el.dataset.lazySrc;
-            el.removeAttribute('data-lazy-src');
-            io.unobserve(el);
-          }
+          if(entry.isIntersecting){ loadThumb(entry.target); io.unobserve(entry.target); }
         });
       }, { root: container, rootMargin: '200px' });
       lazyEls.forEach(el=>io.observe(el));
     } else {
-      lazyEls.forEach(el=>{ el.src = el.dataset.lazySrc; el.removeAttribute('data-lazy-src'); });
+      lazyEls.forEach(loadThumb);
     }
 
     container.querySelectorAll('[data-play]').forEach(el=>{
       el.addEventListener('click', async (e)=>{
         e.stopPropagation();
         const id = +el.dataset.play;
-        const v = await idbGet('videos', id);
-        if(!v) return;
+        const [v, blob] = await Promise.all([ idbGet('videos', id), idbGetBlob('videos', id) ]);
+        if(!v || !blob) return;
         stopAllAudio(); // don't let the editor's live preview music keep playing under this
         if(playerVideo.src) URL.revokeObjectURL(playerVideo.src);
-        playerVideo.src = URL.createObjectURL(v.blob);
+        playerVideo.src = URL.createObjectURL(blob);
         playerVideo.muted = false;
         playerTitle.textContent = v.name;
         playerOverlay.classList.add('on');
@@ -3262,19 +3403,41 @@
       });
     });
 
+    container.querySelectorAll('[data-dl]').forEach(el=>{
+      el.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        if(el.dataset.busy) return;
+        el.dataset.busy = '1';
+        const prevText = el.textContent;
+        el.textContent = '…';
+        try{
+          const blob = await idbGetBlob('videos', +el.dataset.dl);
+          if(!blob){ el.textContent = prevText; return; }
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = el.dataset.dlname; a.click();
+          setTimeout(()=>URL.revokeObjectURL(url), 4000);
+        } finally {
+          el.textContent = prevText;
+          delete el.dataset.busy;
+        }
+      });
+    });
+
     container.querySelectorAll('[data-edit]').forEach(el=>{
+
       el.addEventListener('click', async ()=>{
         const id = +el.dataset.edit;
-        const v = await idbGet('videos', id);
+        const [v, template] = await Promise.all([ idbGet('videos', id), idbGetVideoTemplate(id) ]);
         if(!v) return;
-        if(!v.template){
+        if(!template){
           showTmplStatus('This video was made before editing was supported — no project data to reopen.', true);
           return;
         }
         try{
           currentEditingVideoId = id;
           currentEditorVoiceoverId = null;
-          await applyTemplate(v.template);
+          await applyTemplate(template);
           await saveTemplateToStorage();
           galleryModalOverlay.classList.remove('on');
           showTmplStatus(`Reopened "${v.name}" for editing.`);
@@ -3289,7 +3452,10 @@
     container.querySelectorAll('[data-del]').forEach(btn=>{
       btn.addEventListener('click', async (e)=>{
         e.stopPropagation();
-        await idbDelete('videos', +btn.dataset.del);
+        const delId = +btn.dataset.del;
+        await idbDelete('videos', delId);
+        await idbDeleteBlob('videos', delId);
+        await idbDeleteVideoTemplate(delId);
         await refreshAllGalleries();
       });
     });
@@ -3366,7 +3532,8 @@
     if(!files.length) return;
     for(const f of files){
       // saved immediately — mp3s must never depend on staying in memory
-      await idbPut('voiceovers', { name: f.name, blob: f, transcript: null, status: 'pending', matchedVideoId: null, confidence: 0, createdAt: Date.now() });
+      const id = await idbPut('voiceovers', { name: f.name, transcript: null, status: 'pending', matchedVideoId: null, confidence: 0, createdAt: Date.now() });
+      await idbPutBlob('voiceovers', id, f);
     }
     setVoStatus(`Added ${files.length} MP3${files.length===1?'':'s'} — saved.`);
     await renderVoiceList();
@@ -3423,7 +3590,8 @@
         await idbPut('voiceovers', v);
         await renderVoiceList();
         try{
-          const text = await transcribeAudioWithGroq(v.blob, apiKey);
+          const blob = await idbGetBlob('voiceovers', v.id);
+          const text = await transcribeAudioWithGroq(blob, apiKey);
           v.transcript = text;
           v.status = 'done';
           v.error = null;
@@ -3466,7 +3634,8 @@
     await renderVoiceList();
     setVoStatus(`Retrying "${v.name}"…`);
     try{
-      const text = await transcribeAudioWithGroq(v.blob, apiKey);
+      const blob = await idbGetBlob('voiceovers', id);
+      const text = await transcribeAudioWithGroq(blob, apiKey);
       v.transcript = text; v.status = 'done'; v.error = null;
       await idbPut('voiceovers', v);
       setVoStatus(`Transcribed "${v.name}".`);
@@ -3549,13 +3718,15 @@
   async function attemptAutoMatchVoiceovers(){
     const CONFIDENCE_FLOOR = 0.6;
     const voiceovers = (await idbGetAll('voiceovers')).filter(v => v.transcript && !v.matchedVideoId);
-    const videos = (await idbGetAll('videos')).filter(v => v.template && Array.isArray(v.template.captions) && !v.template.audioFile);
+    // uses the light 'captions'/'hasVoice' fields on the video record — no template
+    // or blob fetch needed just to score candidates against every voiceover.
+    const videos = (await idbGetAll('videos')).filter(v => Array.isArray(v.captions) && v.captions.length && !v.hasVoice);
     if(!voiceovers.length || !videos.length) return;
 
     const pairs = [];
     for(const vo of voiceovers){
       for(const vid of videos){
-        const { confidence } = scoreTranscriptAgainstVideo(vo.transcript, vid.template.captions);
+        const { confidence } = scoreTranscriptAgainstVideo(vo.transcript, vid.captions);
         if(confidence >= CONFIDENCE_FLOOR) pairs.push({ vo, vid, confidence });
       }
     }
@@ -3567,9 +3738,13 @@
       p.vo.matchedVideoId = p.vid.id;
       p.vo.confidence = p.confidence;
       await idbPut('voiceovers', p.vo);
-      p.vid.template.audioFile = p.vo.blob;
-      p.vid.template.audioFileName = p.vo.name;
+      const voBlob = await idbGetBlob('voiceovers', p.vo.id);
+      const template = (await idbGetVideoTemplate(p.vid.id)) || {};
+      template.audioFile = voBlob;
+      template.audioFileName = p.vo.name;
+      await idbPutVideoTemplate(p.vid.id, template);
       p.vid.voiceoverId = p.vo.id;
+      p.vid.hasVoice = true;
       await idbPut('videos', p.vid);
     }
     await refreshAllGalleries();
@@ -3584,6 +3759,15 @@
 
   // manually attach a voiceover to a specific gallery video, to the video
   // currently open in the editor (even if unsaved), or detach it entirely
+  // sets/clears a saved video's voice-over inside its (separately stored) template,
+  // and keeps the light 'hasVoice' listing flag on the video record in sync.
+  async function setVideoTemplateAudio(videoId, blob, name){
+    const template = (await idbGetVideoTemplate(videoId)) || {};
+    template.audioFile = blob || null;
+    template.audioFileName = blob ? name : null;
+    await idbPutVideoTemplate(videoId, template);
+  }
+
   async function assignVoiceoverToVideo(voId, videoId){
     const vo = await idbGet('voiceovers', voId);
     if(!vo) return;
@@ -3593,7 +3777,8 @@
     } else if(vo.matchedVideoId){
       const prev = await idbGet('videos', vo.matchedVideoId);
       if(prev && prev.voiceoverId === vo.id){
-        prev.template.audioFile = null; prev.template.audioFileName = null; prev.voiceoverId = null;
+        await setVideoTemplateAudio(prev.id, null, null);
+        prev.voiceoverId = null; prev.hasVoice = false;
         await idbPut('videos', prev);
       }
     }
@@ -3601,7 +3786,7 @@
     if(videoId === CURRENT_EDITOR_KEY){
       // the video currently open in the editor — including one that hasn't
       // been exported/saved yet, so it's still treated like an existing video
-      applyVoiceoverToEditor(vo);
+      await applyVoiceoverToEditor(vo);
       currentEditorVoiceoverId = vo.id;
       vo.matchedVideoId = CURRENT_EDITOR_KEY;
       vo.confidence = 1;
@@ -3614,9 +3799,9 @@
             const otherVo = await idbGet('voiceovers', vid.voiceoverId);
             if(otherVo){ otherVo.matchedVideoId = null; otherVo.confidence = 0; await idbPut('voiceovers', otherVo); }
           }
-          vid.template.audioFile = vo.blob;
-          vid.template.audioFileName = vo.name;
-          vid.voiceoverId = vo.id;
+          const voBlob = await idbGetBlob('voiceovers', vo.id);
+          await setVideoTemplateAudio(vid.id, voBlob, vo.name);
+          vid.voiceoverId = vo.id; vid.hasVoice = true;
           await idbPut('videos', vid);
         }
       }
@@ -3628,13 +3813,13 @@
           const otherVo = await idbGet('voiceovers', vid.voiceoverId);
           if(otherVo){ otherVo.matchedVideoId = null; otherVo.confidence = 0; await idbPut('voiceovers', otherVo); }
         }
-        vid.template.audioFile = vo.blob;
-        vid.template.audioFileName = vo.name;
-        vid.voiceoverId = vo.id;
+        const voBlob = await idbGetBlob('voiceovers', vo.id);
+        await setVideoTemplateAudio(vid.id, voBlob, vo.name);
+        vid.voiceoverId = vo.id; vid.hasVoice = true;
         await idbPut('videos', vid);
         vo.matchedVideoId = videoId;
         // if this saved video is also the one open in the editor right now, reflect it live
-        if(currentEditingVideoId === videoId) applyVoiceoverToEditor(vo);
+        if(currentEditingVideoId === videoId) await applyVoiceoverToEditor(vo);
       }
     } else {
       vo.matchedVideoId = null;
@@ -3647,14 +3832,15 @@
 
   // attaches a voiceover blob straight into the open editor — same effect as
   // manually dropping it into "Add MP3", just sourced from the library
-  function applyVoiceoverToEditor(vo){
-    audioFile = vo.blob;
-    originalAudioFile = vo.blob; // this newly-matched MP3 is now the pristine base — "Apply speed" must stretch from THIS, not whatever was loaded before
-    audioDT.textContent = vo.name || (vo.blob && vo.blob.name) || 'Audio track';
+  async function applyVoiceoverToEditor(vo){
+    const blob = await idbGetBlob('voiceovers', vo.id);
+    audioFile = blob;
+    originalAudioFile = blob; // this newly-matched MP3 is now the pristine base — "Apply speed" must stretch from THIS, not whatever was loaded before
+    audioDT.textContent = vo.name || 'Audio track';
     audioDS.textContent = 'Ready — mixed into the exported video (from Voice-over library)';
     audioRemove.style.display = 'block';
     if(previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
-    previewAudioUrl = URL.createObjectURL(vo.blob);
+    previewAudioUrl = URL.createObjectURL(blob);
     previewAudio.src = previewAudioUrl;
     whisperBox.style.display = 'block';
     voiceSpeedBox.style.display = 'block';
@@ -3662,7 +3848,7 @@
     voiceSpeedVal.textContent = '1.00x';
     voiceSpeedResetBtn.style.display = 'none';
     voiceSpeedStatus.textContent = '';
-    saveTemplateToStorage();
+    saveTemplateToStorageDebounced();
   }
 
   async function getCurrentEditorMatchedVoId(){
@@ -3699,8 +3885,8 @@
       const matchedVideo = (!isCurrentEditorMatch && v.matchedVideoId) ? videos.find(vid=>vid.id===v.matchedVideoId) : null;
       const matchedCaptions = isCurrentEditorMatch
         ? captions.filter(c=>c && c.trim()).join(' · ')
-        : (matchedVideo && matchedVideo.template && Array.isArray(matchedVideo.template.captions)
-          ? matchedVideo.template.captions.filter(c=>c && c.trim()).join(' · ')
+        : (matchedVideo && Array.isArray(matchedVideo.captions)
+          ? matchedVideo.captions.filter(c=>c && c.trim()).join(' · ')
           : '');
       const options = ['<option value="">— none —</option>',
           `<option value="${CURRENT_EDITOR_KEY}" ${matchedEditorVoId===v.id?'selected':''}>${currentEditorLabel}</option>`
@@ -3738,17 +3924,17 @@
     voList.querySelectorAll('[data-voplay]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = +btn.dataset.voplay;
-        const v = await idbGet('voiceovers', id);
-        if(!v || !v.blob) return;
         // toggle: clicking the currently-playing row's button pauses it
         if(voPlayer.dataset.playingId === String(id) && !voPlayer.paused){
           voPlayer.pause();
           btn.textContent = '▶';
           return;
         }
+        const blob = await idbGetBlob('voiceovers', id);
+        if(!blob) return;
         voList.querySelectorAll('[data-voplay]').forEach(b=>b.textContent = '▶');
         if(voPlayer.src) URL.revokeObjectURL(voPlayer.src);
-        voPlayer.src = URL.createObjectURL(v.blob);
+        voPlayer.src = URL.createObjectURL(blob);
         voPlayer.dataset.playingId = String(id);
         voPlayer.play().catch(()=>{});
         btn.textContent = '⏸';
@@ -3799,7 +3985,8 @@
     const files = Array.from(fileList).filter(f => f.type.startsWith('audio/') || /\.mp3$/i.test(f.name));
     if(!files.length) return;
     for(const f of files){
-      await idbPut('music', { name: f.name, blob: f, createdAt: Date.now() });
+      const id = await idbPut('music', { name: f.name, createdAt: Date.now() });
+      await idbPutBlob('music', id, f);
     }
     setMusicStatus(`Added ${files.length} track${files.length===1?'':'s'} — saved.`);
     await renderMusicList();
@@ -3836,7 +4023,7 @@
       const m = await idbGet('music', +val);
       if(!m){ clearBgMusicSelection(); return; }
       bgMusicId = m.id;
-      bgMusicFile = m.blob;
+      bgMusicFile = await idbGetBlob('music', m.id);
       bgMusicTrimStart = 0; bgMusicTrimEnd = null;
       await loadBgMusicDuration();
       await saveTemplateToStorage();
@@ -3899,7 +4086,7 @@
   }
   [bgMusicStartRange, bgMusicEndRange].forEach(r=>{
     r.addEventListener('input', updateTrimUI);
-    r.addEventListener('change', ()=>{ commitTrimFromSliders(); restartMusicPreviewIfPlaying(); saveTemplateToStorage(); });
+    r.addEventListener('change', ()=>{ commitTrimFromSliders(); restartMusicPreviewIfPlaying(); saveTemplateToStorageDebounced(); });
   });
 
   function restartMusicPreviewIfPlaying(){
@@ -3944,7 +4131,7 @@
     bgMusicVolume = (+bgMusicVolRange.value)/100;
     bgMusicVolVal.textContent = bgMusicVolRange.value + '%';
     musicPlayer.volume = bgMusicVolume;   // audible live — no need to download/export to hear the level
-    saveTemplateToStorage();
+    saveTemplateToStorageDebounced();
   });
 
   async function renderMusicList(){
@@ -3967,17 +4154,17 @@
     musicList.querySelectorAll('[data-mplay]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = +btn.dataset.mplay;
-        const m = await idbGet('music', id);
-        if(!m || !m.blob) return;
         if(musicPlayer.dataset.playingId === String(id) && !musicPlayer.paused){
           musicPlayer.pause();
           btn.textContent = '▶';
           return;
         }
+        const blob = await idbGetBlob('music', id);
+        if(!blob) return;
         musicList.querySelectorAll('[data-mplay]').forEach(b=>b.textContent = '▶');
         bgMusicPreviewBtn.textContent = '▶';
         if(musicPlayer.src) URL.revokeObjectURL(musicPlayer.src);
-        musicPlayer.src = URL.createObjectURL(m.blob);
+        musicPlayer.src = URL.createObjectURL(blob);
         musicPlayer.dataset.playingId = String(id);
         musicPlayer.play().catch(()=>{});
         btn.textContent = '⏸';
@@ -3987,6 +4174,7 @@
       btn.addEventListener('click', async ()=>{
         const id = +btn.dataset.mdel;
         await idbDelete('music', id);
+        await idbDeleteBlob('music', id);
         if(bgMusicId === id){ clearBgMusicSelection(); await saveTemplateToStorage(); }
         await renderMusicList();
       });
@@ -4495,8 +4683,10 @@
       const pct = Math.min(60, Math.round((i/totalFrames)*60));
       onProgress(pct);
 
-      // yield periodically so the encoder queue can drain and the tab stays responsive
-      if(i % 4 === 0) await new Promise(r=>setTimeout(r, 0));
+      // yield every frame (not every 4th) so the encoder queue drains and the tab stays
+      // responsive on heavy/long projects — a wide gap between yields is what read as a
+      // stiff, unclickable screen during download on large timelines.
+      await new Promise(r=>setTimeout(r, 0));
     }
     await videoEncoder.flush();
     videoEncoder.close();
@@ -4634,8 +4824,8 @@
     // a stale in-memory blob from an earlier selection.
     if(bgMusicId != null){
       try{
-        const fresh = await idbGet('music', bgMusicId);
-        if(fresh) bgMusicFile = fresh.blob;
+        const fresh = await idbGetBlob('music', bgMusicId);
+        if(fresh) bgMusicFile = fresh;
       } catch(e){ /* fall back to whatever bgMusicFile already holds */ }
     }
     genBtn.disabled = true;
