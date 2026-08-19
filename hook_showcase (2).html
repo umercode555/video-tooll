@@ -4505,20 +4505,54 @@
   })();
 
   // ---------- audio sync: stretch/compress decoded audio to exactly fill video duration ----------
-  // Uses native OfflineAudioContext playbackRate resampling (no external library, no build step).
-  // Speeding up shifts pitch slightly (like a light chipmunk effect) but keeps voice fully audible
-  // and perfectly in sync with the last caption/frame instead of being cut off or trailing silence.
+  // FIXED: this used to change AudioBufferSourceNode.playbackRate to force the voice
+  // track to fit the video length. That resamples pitch along with speed (sped-up
+  // takes sound higher/"chipmunky", slowed-down takes sound deeper/heavier), and
+  // because the live editor preview plays your file at normal, un-stretched speed,
+  // whatever stretch got applied only at export time shifted every word earlier
+  // relative to where you synced it by ear.
+  //
+  // Now this reuses the same pitch-preserving WSOLA time-stretch (SoundTouchJS)
+  // already used by the manual voice-over speed slider elsewhere in this file, so
+  // duration changes without touching pitch — and the result is padded/trimmed to
+  // the exact target sample length so nothing drifts.
   async function syncAudioToDuration(audioBuf, targetDuration){
     const rate = audioBuf.duration / targetDuration;
-    if(Math.abs(rate - 1) < 0.02) return audioBuf; // close enough, skip stretching
-    const targetLength = Math.max(1, Math.round(audioBuf.length / rate));
-    const offline = new OfflineAudioContext(audioBuf.numberOfChannels, targetLength, audioBuf.sampleRate);
-    const src = offline.createBufferSource();
-    src.buffer = audioBuf;
-    src.playbackRate.value = rate;
-    src.connect(offline.destination);
-    src.start(0);
-    return await offline.startRendering();
+    if(Math.abs(rate - 1) < 0.02) return audioBuf; // close enough, skip stretching entirely
+    const targetLength = Math.max(1, Math.round(targetDuration * audioBuf.sampleRate));
+
+    let stretched;
+    try{
+      stretched = await timeStretchAudioBuffer(audioBuf, rate); // tempo-only, pitch preserved
+    } catch(err){
+      // Fallback only if the WSOLA library fails to load (e.g. offline/CDN blocked) —
+      // better to ship slightly pitch-shifted audio than none at all.
+      console.error('pitch-preserving stretch failed, falling back to playbackRate resample', err);
+      const fallbackLen = Math.max(1, Math.round(audioBuf.length / rate));
+      const offline = new OfflineAudioContext(audioBuf.numberOfChannels, fallbackLen, audioBuf.sampleRate);
+      const src = offline.createBufferSource();
+      src.buffer = audioBuf;
+      src.playbackRate.value = rate;
+      src.connect(offline.destination);
+      src.start(0);
+      stretched = await offline.startRendering();
+    }
+
+    // WSOLA's output length can be a handful of samples short of/longer than the
+    // exact target — pad with silence or trim so the track lines up frame-accurately
+    // with the video instead of trailing into a fractional drift.
+    if(stretched.length === targetLength) return stretched;
+    const fixed = new AudioBuffer({
+      numberOfChannels: stretched.numberOfChannels,
+      length: targetLength,
+      sampleRate: stretched.sampleRate
+    });
+    for(let ch=0; ch<stretched.numberOfChannels; ch++){
+      const srcData = stretched.getChannelData(ch);
+      const dstData = fixed.getChannelData(ch);
+      dstData.set(srcData.subarray(0, Math.min(srcData.length, targetLength)));
+    }
+    return fixed;
   }
 
   // Decodes the voice-over (stretched to match the video's exact length, as
@@ -4617,7 +4651,12 @@
   }
 
   function webCodecsSupported(){
-    return typeof window.VideoEncoder === 'function' && typeof window.VideoFrame === 'function';
+    // Also require AudioEncoder/AudioData: some mobile browsers support video
+    // WebCodecs but not audio WebCodecs, which used to make the frame-accurate
+    // path throw mid-export instead of cleanly falling back to the
+    // MediaRecorder path below.
+    return typeof window.VideoEncoder === 'function' && typeof window.VideoFrame === 'function'
+      && typeof window.AudioEncoder === 'function' && typeof window.AudioData === 'function';
   }
 
   async function encodeWithWebCodecs(dur, fps, onProgress){
@@ -4767,32 +4806,51 @@
     if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
     if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
 
+    // FIXED: build/decode the mixed audio buffer BEFORE starting anything
+    // time-sensitive. This used to happen *after* the recorder object existed
+    // but audio playback (audioSrc.start(0)) was still kicked off before the
+    // recorder was actually capturing, so the front of the voice track was
+    // silently dropped by an unpredictable amount (however long decode+stretch
+    // took) — that's what caused voice/image to land in a different order on
+    // every render.
+    let mixedBuf = null;
+    try{ mixedBuf = await buildFinalAudioBuffer(dur); }
+    catch(err){ console.error('audio mix failed, exporting silent', err); }
+
     let recStream = videoStream;
     let audioCtx = null, audioSrc = null;
-    try{
-      const mixedBuf = await buildFinalAudioBuffer(dur);
-      if(mixedBuf){
-        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-        const dest = audioCtx.createMediaStreamDestination();
-        audioSrc = audioCtx.createBufferSource();
-        audioSrc.buffer = mixedBuf;
-        audioSrc.connect(dest);
-        recStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
-        audioSrc.start(0);
-      }
-    } catch(err){ console.error('audio mix failed, exporting silent', err); }
+    if(mixedBuf){
+      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      const dest = audioCtx.createMediaStreamDestination();
+      audioSrc = audioCtx.createBufferSource();
+      audioSrc.buffer = mixedBuf;
+      audioSrc.connect(dest);
+      recStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    }
 
     const recorder = new MediaRecorder(recStream, {mimeType:mime, videoBitsPerSecond: 8_000_000});
     const chunks = [];
     recorder.ondataavailable = e=>{ if(e.data.size) chunks.push(e.data); };
     const finished = new Promise(res=>{ recorder.onstop = res; });
-    recorder.start(1000);
 
+    // Start the recorder and the audio source in the same tick, with nothing
+    // awaited in between, so neither clock gets a head start on the other.
     const track = videoStream.getVideoTracks()[0];
+    recorder.start(1000);
+    if(audioSrc) audioSrc.start(0);
+    const audioClockStart = audioCtx ? audioCtx.currentTime : null;
     const exportStart = performance.now();
+
     await new Promise(resolveLoop=>{
       function step(){
-        const elapsed = (performance.now() - exportStart) / 1000;
+        // Drive the frame timeline off the AudioContext's own clock whenever we
+        // have audio — that's the clock the audio track is actually being timed
+        // against, so drawing frames against it (instead of a separate
+        // performance.now() timeline) keeps picture and voice locked together
+        // even if a frame render briefly stalls on a slow device.
+        const elapsed = audioCtx
+          ? (audioCtx.currentTime - audioClockStart)
+          : (performance.now() - exportStart) / 1000;
         const t = Math.min(dur - 0.001, elapsed);
         previewT = t; renderAt(t);
         if(track.requestFrame) track.requestFrame();
