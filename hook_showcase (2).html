@@ -839,7 +839,7 @@
           <div style="display:flex;justify-content:space-between;font-size:9px;color:rgba(242,240,230,0.45);margin-bottom:4px;">
             <span>Alpha / tint strength</span><span id="cardAlphaVal">90%</span>
           </div>
-          <input type="range" id="cardAlphaRange" min="0.3" max="1" step="0.01" value="0.9" style="width:100%;">
+          <input type="range" id="cardAlphaRange" min="0.05" max="1" step="0.01" value="0.9" style="width:100%;">
         </div>
       </div>
 
@@ -1511,6 +1511,7 @@
     updateSwatch();
     drawPreviewFrame(previewT);
   });
+  cardAlphaRange.addEventListener('change', ()=> saveTemplateToStorage());
   cardColorSwatch.addEventListener('click', ()=>{
     const opening = cardColorPicker.style.display === 'none';
     cardColorPicker.style.display = opening ? 'block' : 'none';
@@ -1522,16 +1523,35 @@
   });
 
   // ---------- card background: solid color or a loaded image + tint ----------
+  let cardAlphaUserTouched = false; // becomes true once the user drags the slider themselves
+  cardAlphaRange.addEventListener('pointerdown', ()=>{ cardAlphaUserTouched = true; });
   function setCardBgMode(mode){
     cardBgMode = mode;
     cardBgModeColorBtn.classList.toggle('active', mode==='color');
     cardBgModeImageBtn.classList.toggle('active', mode==='image');
     cardBgThumbsWrap.style.display = mode==='image' ? 'block' : 'none';
+    // A 90% tint (the right default for a flat color card) washes an actual
+    // photo out to near-white. Drop to a much lighter tint automatically so
+    // the image reads as clearly as it does in the showcase — unless the
+    // user has already picked their own alpha, which we always respect.
+    if(mode==='image' && !cardAlphaUserTouched){
+      cardColorAlpha = 0.35;
+      cardAlphaRange.value = cardColorAlpha;
+      cardAlphaVal.textContent = Math.round(cardColorAlpha*100)+'%';
+    } else if(mode==='color' && !cardAlphaUserTouched){
+      cardColorAlpha = 0.9;
+      cardAlphaRange.value = cardColorAlpha;
+      cardAlphaVal.textContent = Math.round(cardColorAlpha*100)+'%';
+    }
+    // The alpha slider lives inside the collapsible color picker, which is
+    // easy to miss. Auto-open it in image mode so the control that actually
+    // matters here — how much of the photo shows through — is visible.
+    if(mode==='image') cardColorPicker.style.display = 'block';
     if(mode==='image') renderCardBgThumbs();
     drawPreviewFrame(previewT);
   }
-  cardBgModeColorBtn.addEventListener('click', ()=> setCardBgMode('color'));
-  cardBgModeImageBtn.addEventListener('click', ()=> setCardBgMode('image'));
+  cardBgModeColorBtn.addEventListener('click', ()=> { setCardBgMode('color'); saveTemplateToStorage(); });
+  cardBgModeImageBtn.addEventListener('click', ()=> { setCardBgMode('image'); saveTemplateToStorage(); });
   setCardBgMode('color');
 
   function renderCardBgThumbs(){
@@ -1550,11 +1570,13 @@
           if(cardBgImageIdx === 'custom') cardBgImageIdx = null;
           renderCardBgThumbs();
           drawPreviewFrame(previewT);
+          saveTemplateToStorage();
           return;
         }
         cardBgImageIdx = 'custom';
         renderCardBgThumbs();
         drawPreviewFrame(previewT);
+        saveTemplateToStorage();
       });
       cardBgThumbs.appendChild(b);
     }
@@ -1569,6 +1591,7 @@
         cardBgImageIdx = idx;
         renderCardBgThumbs();
         drawPreviewFrame(previewT);
+        saveTemplateToStorage();
       });
       cardBgThumbs.appendChild(b);
     });
@@ -1585,6 +1608,7 @@
         cardBgImageIdx = 'custom';
         renderCardBgThumbs();
         drawPreviewFrame(previewT);
+        saveTemplateToStorage();
       };
       img.src = url;
     }
