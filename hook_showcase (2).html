@@ -851,8 +851,10 @@
         </div>
       </div>
       <div id="cardBgThumbsWrap" style="display:none;margin-bottom:10px;">
-        <div style="font-size:9.5px;color:rgba(242,240,230,0.55);margin-bottom:6px;">Pick which loaded image sits behind the card — the color above becomes a tint over it, so the word stays readable.</div>
+        <div style="font-size:9.5px;color:rgba(242,240,230,0.55);margin-bottom:6px;">Pick which loaded image sits behind the card, or upload your own — the color above becomes a tint over it, so the word stays readable.</div>
         <div id="cardBgThumbs" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+        <input type="file" id="cardBgUploadInput" accept="image/*" style="display:none;">
+        <button type="button" id="cardBgUploadBtn" class="align-btn" style="width:100%;margin-top:8px;">⇪ Upload image from laptop</button>
       </div>
 
       <div class="timing-row" style="align-items:center;">
@@ -1130,6 +1132,7 @@
   let hueVal = 150, satVal = 0.7, valVal = 0.24; // current HSV of the card-color picker
   let cardBgMode = 'color';          // 'color' | 'image'
   let cardBgImageIdx = null;         // which loaded image (0..N-1) sits behind the card
+  let cardBgCustomImg = null;        // {url, img} — user-uploaded card background, not part of the gallery
   let cardTextColor = '#ffffff';     // default color for every card word
   let textHueVal = 0, textSatVal = 0, textValVal = 1; // HSV of the word-color picker
   let cardWordColors = {};           // {wordIndex: hex} per-word override (currently unused by UI, kept inert)
@@ -1165,6 +1168,8 @@
   const cardAlphaVal = document.getElementById('cardAlphaVal');
   const cardBgModeColorBtn = document.getElementById('cardBgModeColorBtn');
   const cardBgModeImageBtn = document.getElementById('cardBgModeImageBtn');
+  const cardBgUploadInput = document.getElementById('cardBgUploadInput');
+  const cardBgUploadBtn = document.getElementById('cardBgUploadBtn');
   const cardBgThumbsWrap = document.getElementById('cardBgThumbsWrap');
   const cardBgThumbs = document.getElementById('cardBgThumbs');
   const cardTextColorSwatch = document.getElementById('cardTextColorSwatch');
@@ -1531,6 +1536,28 @@
 
   function renderCardBgThumbs(){
     cardBgThumbs.innerHTML = '';
+    if(cardBgCustomImg){
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.title = 'Your uploaded image';
+      b.style.cssText = `width:44px;height:78px;padding:0;border-radius:3px;overflow:hidden;cursor:pointer;border:2px solid ${cardBgImageIdx==='custom' ? 'var(--green-bright)' : 'var(--line)'};background:#000;position:relative;`;
+      b.innerHTML = `<img src="${cardBgCustomImg.url}" style="width:100%;height:100%;object-fit:cover;display:block;"><span style="position:absolute;top:1px;right:1px;background:rgba(0,0,0,0.7);color:#fff;font-size:8px;padding:1px 3px;border-radius:2px;">✕</span>`;
+      b.addEventListener('click', (e)=>{
+        // clicking the ✕ badge removes the custom image instead of selecting it
+        const rect = b.getBoundingClientRect();
+        if(e.clientX - rect.left > rect.width-16 && e.clientY - rect.top < 16){
+          cardBgCustomImg = null;
+          if(cardBgImageIdx === 'custom') cardBgImageIdx = null;
+          renderCardBgThumbs();
+          drawPreviewFrame(previewT);
+          return;
+        }
+        cardBgImageIdx = 'custom';
+        renderCardBgThumbs();
+        drawPreviewFrame(previewT);
+      });
+      cardBgThumbs.appendChild(b);
+    }
     images.forEach((slot, idx)=>{
       if(!slot) return;
       const b = document.createElement('button');
@@ -1546,6 +1573,23 @@
       cardBgThumbs.appendChild(b);
     });
   }
+
+  cardBgUploadBtn.addEventListener('click', ()=> cardBgUploadInput.click());
+  cardBgUploadInput.addEventListener('change', e=>{
+    const f = e.target.files[0];
+    if(f && f.type.startsWith('image/')){
+      const url = URL.createObjectURL(f);
+      const img = new Image();
+      img.onload = ()=>{
+        cardBgCustomImg = {file:f, url, img};
+        cardBgImageIdx = 'custom';
+        renderCardBgThumbs();
+        drawPreviewFrame(previewT);
+      };
+      img.src = url;
+    }
+    cardBgUploadInput.value = '';
+  });
 
   // ---------- word color (default + per-word overrides) & per-word position ----------
   cardTextColorSwatch.addEventListener('click', ()=>{
@@ -2762,7 +2806,8 @@
       bgMusicTrimStart,
       bgMusicTrimEnd,
       cardColorAuto, cardColorManual, cardColorAlpha,
-      cardBgMode, cardBgImageIdx, cardTextColor
+      cardBgMode, cardBgImageIdx, cardTextColor,
+      cardBgCustomImgFile: cardBgCustomImg ? cardBgCustomImg.file : null
     };
   }
 
@@ -2791,8 +2836,18 @@
     if(typeof t.cardColorManual === 'string') cardColorManual = t.cardColorManual;
     if(typeof t.cardColorAlpha === 'number') cardColorAlpha = t.cardColorAlpha;
     if(typeof t.cardBgMode === 'string') cardBgMode = t.cardBgMode;
-    if(typeof t.cardBgImageIdx === 'number' || t.cardBgImageIdx === null) cardBgImageIdx = t.cardBgImageIdx;
+    if(typeof t.cardBgImageIdx === 'number' || t.cardBgImageIdx === 'custom' || t.cardBgImageIdx === null) cardBgImageIdx = t.cardBgImageIdx;
     if(typeof t.cardTextColor === 'string') cardTextColor = t.cardTextColor;
+    cardBgCustomImg = null;
+    if(t.cardBgCustomImgFile){
+      cardBgCustomImg = await new Promise(resolve=>{
+        const url = URL.createObjectURL(t.cardBgCustomImgFile);
+        const img = new Image();
+        img.onload = ()=> resolve({ file: t.cardBgCustomImgFile, url, img });
+        img.onerror = ()=> resolve(null);
+        img.src = url;
+      });
+    }
     cardColorAutoToggle.checked = cardColorAuto;
     cardAlphaRange.value = cardColorAlpha;
     setCardBgMode(cardBgMode || 'color');
@@ -3570,6 +3625,7 @@
   // manually dropping it into "Add MP3", just sourced from the library
   function applyVoiceoverToEditor(vo){
     audioFile = vo.blob;
+    originalAudioFile = vo.blob; // this newly-matched MP3 is now the pristine base — "Apply speed" must stretch from THIS, not whatever was loaded before
     audioDT.textContent = vo.name || (vo.blob && vo.blob.name) || 'Audio track';
     audioDS.textContent = 'Ready — mixed into the exported video (from Voice-over library)';
     audioRemove.style.display = 'block';
@@ -3577,6 +3633,11 @@
     previewAudioUrl = URL.createObjectURL(vo.blob);
     previewAudio.src = previewAudioUrl;
     whisperBox.style.display = 'block';
+    voiceSpeedBox.style.display = 'block';
+    voiceSpeedRange.value = 1;
+    voiceSpeedVal.textContent = '1.00x';
+    voiceSpeedResetBtn.style.display = 'none';
+    voiceSpeedStatus.textContent = '';
     saveTemplateToStorage();
   }
 
@@ -3985,10 +4046,11 @@
   function drawCard(text, localT, dur){
     const wIdx = cardWordIndexAt(text, localT, dur);
 
-    if(cardBgMode === 'image' && cardBgImageIdx != null && images[cardBgImageIdx]){
+    const cardBgImg = cardBgImageIdx === 'custom' ? (cardBgCustomImg && cardBgCustomImg.img) : (cardBgImageIdx != null && images[cardBgImageIdx] ? images[cardBgImageIdx].img : null);
+    if(cardBgMode === 'image' && cardBgImg){
       ctx.fillStyle = '#050806';
       ctx.fillRect(0,0,W,H);
-      coverDraw(images[cardBgImageIdx].img, 0, 0, W, H);
+      coverDraw(cardBgImg, 0, 0, W, H);
       ctx.fillStyle = activeCardFill(); // semi-transparent tint over the image, keeps the word readable
       ctx.fillRect(0,0,W,H);
     } else {
