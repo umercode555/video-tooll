@@ -1034,6 +1034,15 @@
       <h2>All videos</h2>
       <button type="button" class="modal-close" id="galleryModalClose">✕</button>
     </div>
+    <div id="storagePanel" style="border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:12px;">
+      <div id="storageUsageLine" style="font-family:var(--mono);font-size:10.5px;color:rgba(242,240,230,0.75);margin-bottom:8px;">Checking storage usage…</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="align-btn" id="storagePruneBtn" style="padding:6px 9px;">Keep last 10 videos, delete rest</button>
+        <button type="button" class="align-btn" id="storageClearVideosBtn" style="padding:6px 9px;">Delete all saved videos</button>
+        <button type="button" class="align-btn" id="storageClearMusicBtn" style="padding:6px 9px;">Delete all music</button>
+      </div>
+      <div id="storageActionStatus" style="font-size:9.5px;color:var(--green-bright);margin-top:6px;min-height:12px;"></div>
+    </div>
     <div id="videoGalleryModal" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div id="galleryModalEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No videos generated yet.</div>
   </div>
@@ -3299,6 +3308,7 @@
     }
     currentEditingVideoId = id;
     currentEditorVoiceoverId = null;
+    await autoPruneIfNeeded();
     await refreshAllGalleries();
     await attemptAutoMatchVoiceovers().catch(err=>console.error('voiceover auto-match failed', err));
     await renderVoiceList().catch(()=>{});
@@ -3482,6 +3492,7 @@
   }
   const renderGallery = refreshAllGalleries; // back-compat alias
   refreshAllGalleries();
+  refreshStorageUsage();
 
   openGalleryBtn.addEventListener('click', async ()=>{
     galleryModalOverlay.classList.add('on');
@@ -3491,9 +3502,107 @@
       renderGalleryRows(videoGalleryModal, all, modalGalleryObjectUrls);
       galleryModalDirty = false;
     }
+    refreshStorageUsage();
   });
   galleryModalClose.addEventListener('click', ()=>{ galleryModalOverlay.classList.remove('on'); });
   galleryModalOverlay.addEventListener('click', e=>{ if(e.target === galleryModalOverlay) galleryModalOverlay.classList.remove('on'); });
+
+  // ---------- storage usage + cleanup ----------
+  // Crashes reported "especially after downloading/rendering" line up with unbounded
+  // IndexedDB growth: every saved video keeps THREE copies of its weight — the
+  // rendered mp4 (videoBlobs), and its full source project re-saved verbatim
+  // (videoTemplates: every one of the 10 source images + the voice-over mp3 + the
+  // music track, all over again, per video). With ~1GB of music/voiceovers and ~1GB
+  // of video/image assets already in play, that compounds fast and a low-memory
+  // browser tab (especially on mobile) can OOM/crash right when it tries to decode
+  // + hold a fresh multi-MB export in RAM on top of everything already cached.
+  // This panel makes usage visible and gives a one-click way to prune it back down.
+  const storageUsageLine = document.getElementById('storageUsageLine');
+  const storagePruneBtn = document.getElementById('storagePruneBtn');
+  const storageClearVideosBtn = document.getElementById('storageClearVideosBtn');
+  const storageClearMusicBtn = document.getElementById('storageClearMusicBtn');
+  const storageActionStatus = document.getElementById('storageActionStatus');
+  function fmtBytes(n){
+    if(!n && n!==0) return '?';
+    if(n < 1024*1024) return (n/1024).toFixed(0)+' KB';
+    if(n < 1024*1024*1024) return (n/(1024*1024)).toFixed(1)+' MB';
+    return (n/(1024*1024*1024)).toFixed(2)+' GB';
+  }
+  async function refreshStorageUsage(){
+    try{
+      if(navigator.storage && navigator.storage.estimate){
+        const { usage, quota } = await navigator.storage.estimate();
+        const pct = quota ? Math.round((usage/quota)*100) : null;
+        storageUsageLine.textContent = `Using ${fmtBytes(usage)}${quota ? ` of ${fmtBytes(quota)} available (${pct}%)` : ''}. Big libraries here are the usual cause of crashes on render/download — prune below if things feel unstable.`;
+      } else {
+        storageUsageLine.textContent = 'Storage usage not available in this browser.';
+      }
+    } catch(e){
+      storageUsageLine.textContent = 'Could not read storage usage.';
+    }
+  }
+  // Keeps only the N most recently created saved videos — deletes the metadata,
+  // the rendered mp4 blob, AND the full duplicated project template for every
+  // older one, since that template (images+audio) is the biggest single offender.
+  async function pruneVideosKeepLatest(keep){
+    const all = (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt);
+    const toDelete = all.slice(keep);
+    for(const v of toDelete){
+      await idbDelete('videos', v.id);
+      await idbDeleteBlob('videos', v.id);
+      await idbDeleteVideoTemplate(v.id);
+    }
+    return toDelete.length;
+  }
+  storagePruneBtn.addEventListener('click', async ()=>{
+    storagePruneBtn.disabled = true;
+    storageActionStatus.textContent = 'Pruning…';
+    try{
+      const n = await pruneVideosKeepLatest(10);
+      await refreshAllGalleries();
+      galleryModalDirty = false;
+      renderGalleryRows(videoGalleryModal, (await idbGetAll('videos')).sort((a,b)=> b.createdAt - a.createdAt), modalGalleryObjectUrls);
+      storageActionStatus.textContent = n ? `Deleted ${n} older video${n===1?'':'s'} (and their duplicated source assets).` : 'Nothing to prune — 10 or fewer videos saved.';
+      await refreshStorageUsage();
+    } finally { storagePruneBtn.disabled = false; }
+  });
+  storageClearVideosBtn.addEventListener('click', async ()=>{
+    if(!confirm('Delete every saved video from the gallery? This cannot be undone.')) return;
+    storageClearVideosBtn.disabled = true;
+    storageActionStatus.textContent = 'Deleting…';
+    try{
+      const n = await pruneVideosKeepLatest(0);
+      await refreshAllGalleries();
+      galleryModalDirty = false;
+      renderGalleryRows(videoGalleryModal, [], modalGalleryObjectUrls);
+      storageActionStatus.textContent = `Deleted ${n} saved video${n===1?'':'s'}.`;
+      await refreshStorageUsage();
+    } finally { storageClearVideosBtn.disabled = false; }
+  });
+  storageClearMusicBtn.addEventListener('click', async ()=>{
+    if(!confirm('Delete every uploaded background music track? This cannot be undone.')) return;
+    storageClearMusicBtn.disabled = true;
+    storageActionStatus.textContent = 'Deleting…';
+    try{
+      const keys = await idbGetAllKeys('music');
+      for(const k of keys){ await idbDelete('music', k); await idbDeleteBlob('music', k); }
+      storageActionStatus.textContent = `Deleted ${keys.length} music track${keys.length===1?'':'s'}.`;
+      try{ await renderMusicList(); }catch(e){}
+      try{ await renderBgMusicOptions(); }catch(e){}
+      await refreshStorageUsage();
+    } finally { storageClearMusicBtn.disabled = false; }
+  });
+  // Auto-prune: after every new render, if the gallery has grown past a generous
+  // cap, quietly trim it back — the crash risk scales with total stored bytes,
+  // not with any single save, so this keeps it from creeping up unnoticed between
+  // the times the user happens to open "All videos" and prune manually.
+  const AUTO_PRUNE_KEEP = 40;
+  async function autoPruneIfNeeded(){
+    try{
+      const count = (await idbGetAllKeys('videos')).length;
+      if(count > AUTO_PRUNE_KEEP) await pruneVideosKeepLatest(AUTO_PRUNE_KEEP);
+    } catch(e){ console.error('auto-prune failed', e); }
+  }
 
   // ---------- bulk voice-over library: upload, transcribe, auto-match to gallery videos ----------
   const voiceLibModalOverlay = document.getElementById('voiceLibModalOverlay');
@@ -4518,10 +4627,30 @@
   // the exact target sample length so nothing drifts.
   async function syncAudioToDuration(audioBuf, targetDuration){
     const rate = audioBuf.duration / targetDuration;
-    if(Math.abs(rate - 1) < 0.02) return audioBuf; // close enough, skip stretching entirely
     const targetLength = Math.max(1, Math.round(targetDuration * audioBuf.sampleRate));
 
+    // BUGFIX: this used to `return audioBuf` unmodified whenever rate was within 2% of
+    // 1x, skipping the stretch step entirely. That's fine for pitch/quality, but the
+    // buffer handed back was still whatever length the source mp3 actually was — and
+    // buildFinalAudioBuffer() renders into an OfflineAudioContext whose total length is
+    // hard-capped at `targetDuration`. Any tail beyond that length is silently dropped
+    // by the offline renderer (not an error) — so a voice-over just 1-2% longer than the
+    // video's visual timeline (a few seconds on a longer product video) had its last few
+    // seconds of narration cut from the export even though sync said "aligned".
+    // Fix: for these small deltas, do a cheap playbackRate resample instead of skipping
+    // — a <2% speed change is inaudible, and it guarantees every sample of the voice-over
+    // ends up inside the export instead of some of it being dropped past the cutoff.
     let stretched;
+    if(Math.abs(rate - 1) < 0.02){
+      const fallbackLen = Math.max(1, Math.round(audioBuf.length / rate));
+      const nudgeCtx = new OfflineAudioContext(audioBuf.numberOfChannels, fallbackLen, audioBuf.sampleRate);
+      const nudgeSrc = nudgeCtx.createBufferSource();
+      nudgeSrc.buffer = audioBuf;
+      nudgeSrc.playbackRate.value = rate;
+      nudgeSrc.connect(nudgeCtx.destination);
+      nudgeSrc.start(0);
+      stretched = await nudgeCtx.startRendering();
+    } else
     try{
       stretched = await timeStretchAudioBuffer(audioBuf, rate); // tempo-only, pitch preserved
     } catch(err){
@@ -4918,6 +5047,13 @@
       return;
     }
 
+    // LEAK FIX: every previous export's blob URL (and the full mp4 ArrayBuffer/Blob it
+    // keeps alive) used to stay referenced by dlLink.href for the rest of the session,
+    // since nothing ever revoked it before overwriting it — rendering several videos
+    // without reloading the tab meant every prior export's memory stayed pinned. That,
+    // stacked on top of a large IndexedDB library, is exactly the kind of pressure that
+    // tips a mobile/low-RAM tab into crashing on a later render or download.
+    if(dlLink.href && dlLink.href.startsWith('blob:')) URL.revokeObjectURL(dlLink.href);
     const url = URL.createObjectURL(finalBlob);
     dlLink.href = url;
     dlLink.download = filename;
