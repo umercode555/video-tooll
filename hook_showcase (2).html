@@ -750,6 +750,33 @@
       </button>
       <div class="timecode" id="timecode">00.0 / 00.0s</div>
       <div class="progressline" id="progressLine"><div class="fill" id="progFill"></div><div class="playhead" id="playhead"></div></div>
+      <button type="button" id="voiceCtrlBtn" title="Voice control (click to talk)" style="width:32px;height:32px;border-radius:50%;background:#1a1a16;border:1px solid var(--line);color:var(--paper);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-left:6px;">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1Z" fill="currentColor"/><path d="M4 7.5a.5.5 0 0 0-1 0 5 5 0 0 0 4.5 4.975V14H6a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1H8.5v-1.525A5 5 0 0 0 13 7.5a.5.5 0 0 0-1 0 4 4 0 0 1-8 0Z" fill="currentColor"/></svg>
+      </button>
+      <button type="button" id="voiceHelpBtn" title="Voice commands — what can I say?" style="width:32px;height:32px;border-radius:50%;background:#1a1a16;border:1px solid var(--line);color:var(--paper);cursor:pointer;font-size:12px;flex:0 0 auto;margin-left:4px;">?</button>
+    </div>
+  </div>
+
+  <div id="voicePanel" style="display:none;position:fixed;left:12px;bottom:12px;z-index:9999;width:280px;max-width:calc(100vw - 24px);background:#101210;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--paper);box-shadow:0 8px 30px rgba(0,0,0,0.5);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span id="voiceStateLabel" style="color:var(--green-bright);">Voice control</span>
+      <select id="voiceLangSelect" style="background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:10px;border-radius:3px;padding:2px 4px;">
+        <option value="en-US">English / Roman Urdu</option>
+        <option value="ur-PK">Urdu (script)</option>
+      </select>
+    </div>
+    <div id="voiceHeard" style="min-height:14px;color:rgba(242,240,230,0.55);margin-bottom:4px;word-break:break-word;"></div>
+    <div id="voiceResult" style="min-height:14px;word-break:break-word;margin-bottom:6px;"></div>
+    <input type="password" id="geminiKeyInput" placeholder="Gemini API key (AIza...)" style="width:100%;box-sizing:border-box;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:10px;border-radius:3px;padding:5px 6px;">
+  </div>
+
+  <div class="modal-overlay" id="voiceSheetOverlay" style="display:none;">
+    <div class="modal" style="max-width:560px;max-height:80vh;overflow:auto;">
+      <div class="modal-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Voice Commands — What Can I Control?</h3>
+        <button type="button" class="modal-close" id="voiceSheetClose">✕</button>
+      </div>
+      <div id="voiceSheetBody" style="font-family:var(--mono);font-size:11.5px;line-height:1.5;"></div>
     </div>
   </div>
 
@@ -5070,6 +5097,338 @@
       showTmplStatus('Video downloaded but could not save to gallery.', true);
     }
   });
+
+  // ================= VOICE CONTROL LAYER =================
+  (function(){
+    const voiceCtrlBtn = document.getElementById('voiceCtrlBtn');
+    const voiceHelpBtn = document.getElementById('voiceHelpBtn');
+    const voicePanel = document.getElementById('voicePanel');
+    const voiceStateLabel = document.getElementById('voiceStateLabel');
+    const voiceHeard = document.getElementById('voiceHeard');
+    const voiceResult = document.getElementById('voiceResult');
+    const voiceLangSelect = document.getElementById('voiceLangSelect');
+    const voiceSheetOverlay = document.getElementById('voiceSheetOverlay');
+    const voiceSheetClose = document.getElementById('voiceSheetClose');
+    const voiceSheetBody = document.getElementById('voiceSheetBody');
+    const geminiKeyInput = document.getElementById('geminiKeyInput');
+    geminiKeyInput.value = localStorage.getItem('geminiApiKey') || '';
+    geminiKeyInput.addEventListener('input', ()=> localStorage.setItem('geminiApiKey', geminiKeyInput.value.trim()));
+
+    voiceLangSelect.value = localStorage.getItem('voiceCtrlLang') || 'en-US';
+    voiceLangSelect.addEventListener('change', ()=> localStorage.setItem('voiceCtrlLang', voiceLangSelect.value));
+
+    // ---------- helpers reused from the existing editor state ----------
+    function activeIdx(){ return activeShowIdx(previewT); }
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function say(msg, ok){ voiceResult.style.color = ok===false ? '#e0866a' : 'var(--green-bright)'; voiceResult.textContent = msg; }
+    function currentCapIndex(){
+      const t = activeSegType(previewT);
+      if(t === 'show') return activeIdx();
+      return null; // hook/card don't use the captions[] array
+    }
+    function stripPunct(s){ return (s||'').replace(/[.,!?;:]+/g,'').replace(/\s{2,}/g,' ').trim(); }
+
+    // ---------- the action registry: every voice-controllable action ----------
+    // Each action: id, desc (for the LLM + sheet), examples (for the sheet), run(args)->string
+    const ACTIONS = [
+      { id:'play', desc:'Start/resume playback from the current position.',
+        examples:['play','play from here','resume'],
+        run(){ if(loadedCount()<N) return 'Load all 10 images first.'; if(!playing) playBtn.click(); return 'Playing.'; } },
+      { id:'pause', desc:'Pause/stop playback (stays at current position).',
+        examples:['pause','stop','stop playback','rok do'],
+        run(){ if(playing) stopPreview(); return 'Paused.'; } },
+      { id:'seek', desc:'Seek/stop the playhead at an exact time in seconds. args:{seconds:number}',
+        examples:['stop at 5.6 seconds','go to 3 seconds','seek to 10s','5.6 second par ruk jao'],
+        run(a){ if(loadedCount()<N) return 'Load all 10 images first.'; const dur=totalDuration(); const t=clamp(+a.seconds||0,0,dur); if(playing) stopPreview(); drawPreviewFrame(t); timecode.textContent=`${t.toFixed(1)} / ${dur.toFixed(1)}s`; setProgress(dur?t/dur:0); return `Stopped at ${t.toFixed(1)}s.`; } },
+      { id:'seek_relative', desc:'Move the playhead forward/back by N seconds from current position. args:{deltaSeconds:number}',
+        examples:['go forward 2 seconds','go back 1 second','2 second aage jao'],
+        run(a){ const dur=totalDuration(); const t=clamp(previewT+(+a.deltaSeconds||0),0,dur); if(playing) stopPreview(); drawPreviewFrame(t); timecode.textContent=`${t.toFixed(1)} / ${dur.toFixed(1)}s`; setProgress(dur?t/dur:0); return `Now at ${t.toFixed(1)}s.`; } },
+      { id:'goto_start', desc:'Jump playhead to the very start (0s).', examples:['go to start','from the beginning','shuru se'],
+        run(){ if(playing) stopPreview(); drawPreviewFrame(0); setProgress(0); return 'At start.'; } },
+      { id:'goto_end', desc:'Jump playhead to the very end.', examples:['go to the end','last part'],
+        run(){ const dur=totalDuration(); if(playing) stopPreview(); drawPreviewFrame(dur); setProgress(1); return 'At end.'; } },
+
+      { id:'set_hook_duration', desc:'Set the hook-flash duration per image, in seconds (0.1–1). args:{seconds:number}',
+        examples:['set hook duration to 0.3 seconds','hook 0.5 second kar do'],
+        run(a){ const v=clamp(+a.seconds,0.1,1); hookDur=v; hookDurRange.value=v; hookDurNum.value=v.toFixed(2); refreshAll(); return `Hook duration set to ${v.toFixed(2)}s.`; } },
+      { id:'adjust_hook_duration', desc:'Increase/decrease hook-flash duration by a delta in seconds. args:{deltaSeconds:number}',
+        examples:['increase hook duration by 0.1','hook thora barhao'],
+        run(a){ const v=clamp(hookDur+(+a.deltaSeconds||0),0.1,1); hookDur=v; hookDurRange.value=v; hookDurNum.value=v.toFixed(2); refreshAll(); return `Hook duration now ${v.toFixed(2)}s.`; } },
+
+      { id:'set_card_duration', desc:'Set the keyword-card duration, in seconds (1–10). args:{seconds:number}',
+        examples:['set card duration to 3.5 seconds','card 4 second kar do'],
+        run(a){ const v=clamp(+a.seconds,1,10); cardDur=v; cardDurRange.value=v; cardDurNum.value=v.toFixed(2); refreshAll(); return `Card duration set to ${v.toFixed(2)}s.`; } },
+      { id:'adjust_card_duration', desc:'Increase/decrease card duration by delta seconds. args:{deltaSeconds:number}',
+        examples:['increase card duration by 0.5','card ki duration ghata do'],
+        run(a){ const v=clamp(cardDur+(+a.deltaSeconds||0),1,10); cardDur=v; cardDurRange.value=v; cardDurNum.value=v.toFixed(2); refreshAll(); return `Card duration now ${v.toFixed(2)}s.`; } },
+      { id:'set_card_position', desc:'Move the keyword card to sit after image N (0 = right after hook, N = end). args:{afterImage:number}',
+        examples:['put the card after image 3','card ko end mein le jao'],
+        run(a){ const v=clamp(Math.round(+a.afterImage),0,N); cardPos=v; cardPosSelect.value=v; refreshAll(); return `Card now after image ${v}.`; } },
+
+      { id:'set_image_duration', desc:'Set a specific image\'s on-screen duration in seconds. args:{imageIndex:number(1-based, omit for currently-shown image), seconds:number}',
+        examples:['set image 3 duration to 2 seconds','is ki duration 2 second kar do'],
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active — say which image number.'; const v=clamp(+a.seconds,0.2,20); showDur[i]=v; renderCaptions(); refreshAll(); return `Image ${i+1} duration set to ${v.toFixed(2)}s.`; } },
+      { id:'adjust_image_duration', desc:'Increase/decrease a specific (or currently active) image\'s duration by delta seconds. args:{imageIndex:number(1-based,optional), deltaSeconds:number}',
+        examples:['increase this image duration by 0.3 seconds','is ki duration 0.3 second barha do','decrease image 2 by 0.5 seconds'],
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active — say which image number.'; const v=clamp(showDur[i]+(+a.deltaSeconds||0),0.2,20); showDur[i]=v; renderCaptions(); refreshAll(); return `Image ${i+1} duration now ${v.toFixed(2)}s.`; } },
+
+      { id:'set_caption_text', desc:'Set the caption text for a specific (or currently active) showcase image. args:{imageIndex:number(1-based,optional), text:string}',
+        examples:['set caption 2 to Best Deal Today','is ki caption change karo'],
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : currentCapIndex(); if(i==null) return 'No showcase caption is active right now.'; captions[i]=a.text||''; renderCaptions(); drawPreviewFrame(previewT); return `Caption ${i+1} updated.`; } },
+      { id:'remove_punctuation', desc:'Remove punctuation (full stops, commas etc) from the current/target caption or the card text. args:{imageIndex:number(1-based,optional), target:"caption"|"card"|"hook"(optional, default = whatever is active)}',
+        examples:['remove the full stop','comma bhi remove karo','intro se full stop hatao','card text se comma nikal do'],
+        run(a){
+          const target = a.target || activeSegType(previewT);
+          if(target==='card'){ cardTextInput.value = stripPunct(cardTextInput.value); drawPreviewFrame(previewT); return 'Removed punctuation from the card text.'; }
+          if(target==='hook'){ hookCaptionText = stripPunct(hookCaptionText); hookCapText.value = hookCaptionText; drawPreviewFrame(previewT); return 'Removed punctuation from the intro/hook caption.'; }
+          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : currentCapIndex();
+          if(i==null) return 'No caption is active right now — say which image, or "card"/"hook".';
+          captions[i] = stripPunct(captions[i]); renderCaptions(); drawPreviewFrame(previewT);
+          return `Removed punctuation from caption ${i+1}.`;
+        } },
+      { id:'set_caption_font_size', desc:'Set showcase caption font size (10-90). args:{size:number}',
+        examples:['make captions bigger, size 40','caption size 24 kar do'],
+        run(a){ const v=clamp(Math.round(+a.size),10,90); capFontSize=v; capSizeVal.value=v; drawPreviewFrame(previewT); return `Caption size ${v}.`; } },
+      { id:'adjust_caption_font_size', desc:'Increase/decrease showcase caption font size by delta. args:{delta:number}',
+        examples:['make the caption bigger','caption chota karo'],
+        run(a){ const v=clamp(capFontSize+(+a.delta||4),10,90); capFontSize=v; capSizeVal.value=v; drawPreviewFrame(previewT); return `Caption size ${v}.`; } },
+      { id:'set_caption_color', desc:'Set text color for a caption/word/card. args:{colorHex:string(e.g. "#ffffff" or "black"/"white"), imageIndex:number(1-based,optional), target:"caption"|"card"(optional)}',
+        examples:['make this word black','caption ko white kar do','card text red kar do'],
+        run(a){
+          let hex = (a.colorHex||'').trim().toLowerCase();
+          const named = {black:'#000000',white:'#ffffff',red:'#ff3b30',green:'#34c759',blue:'#0a84ff',yellow:'#ffd60a',orange:'#ff9500',pink:'#ff2d78',purple:'#af52de'};
+          if(named[hex]) hex = named[hex];
+          if(!/^#[0-9a-f]{6}$/.test(hex)) return 'Could not understand that color.';
+          const target = a.target || activeSegType(previewT);
+          if(target==='card'){ cardTextColor = hex; drawPreviewFrame(previewT); return `Card text color set.`; }
+          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : currentCapIndex();
+          if(i==null) return 'No caption is active right now.';
+          capTextColor[i] = hex; renderCaptions(); drawPreviewFrame(previewT);
+          return `Caption ${i+1} color set.`;
+        } },
+      { id:'toggle_word_by_word', desc:'Turn word-by-word caption reveal on/off, for hook or showcase captions. args:{target:"hook"|"show", on:boolean}',
+        examples:['turn on word by word for captions','hook mein word by word band karo'],
+        run(a){ if(a.target==='hook'){ hookWordByWord=!!a.on; hookWordToggle.checked=hookWordByWord; } else { showWordByWord=!!a.on; showWordToggle.checked=showWordByWord; } drawPreviewFrame(previewT); return `Word-by-word ${a.on?'on':'off'} for ${a.target||'show'} captions.`; } },
+      { id:'move_caption_position', desc:'Nudge the active caption/card text position on screen. args:{direction:"up"|"down"|"left"|"right", amount:number(0..1 normalized, default 0.03)}',
+        examples:['move this caption up','move it down a bit','isay left kar do'],
+        run(a){
+          const pos = activePos(); const amt = a.amount || 0.03;
+          if(a.direction==='up') pos.yNorm = clamp(pos.yNorm-amt,0.02,0.98);
+          else if(a.direction==='down') pos.yNorm = clamp(pos.yNorm+amt,0.02,0.98);
+          else if(a.direction==='left') pos.xNorm = clamp(pos.xNorm-amt,0.02,0.98);
+          else if(a.direction==='right') pos.xNorm = clamp(pos.xNorm+amt,0.02,0.98);
+          else return 'Say up, down, left, or right.';
+          updateCapHandle(); drawPreviewFrame(previewT);
+          return `Moved ${a.direction}.`;
+        } },
+
+      { id:'set_card_text', desc:'Set the keyword-card text. args:{text:string}',
+        examples:['set the card text to Limited Stock','card pe likho Sale'],
+        run(a){ cardTextInput.value = a.text||''; drawPreviewFrame(previewT); return 'Card text updated.'; } },
+
+      { id:'replace_image', desc:'Open the file picker to replace a specific (or currently active) image slot. Cannot pick the file itself by voice — opens the dialog for the user. args:{imageIndex:number(1-based,optional)}',
+        examples:['replace this image','ye image replace karo','change image 4'],
+        run(a){
+          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx();
+          if(i==null) return 'No image is currently active — say which image number.';
+          const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
+          inp.addEventListener('change', ()=>{
+            const f = inp.files[0]; if(!f) return;
+            const url = URL.createObjectURL(f); const img = new Image();
+            img.onload = ()=>{ images[i] = {file:f, url, img}; renderTray(); updateGenState(); computeAutoCardColor(); refreshAll(); };
+            img.src = url;
+          });
+          inp.click();
+          return `Pick the replacement file for image ${i+1} — file picker opened.`;
+        } },
+
+      { id:'set_voiceover_speed', desc:'Set voice-over playback speed (0.5-2x, pitch preserved). args:{speed:number}',
+        examples:['voice-over 1.15x kar do','set voice speed to 1.2'],
+        run(a){ const v=clamp(+a.speed,0.5,2); voiceSpeedRange.value=v; voiceSpeedVal.textContent=v.toFixed(2)+'x'; voiceSpeedApplyBtn.click(); return `Applying voice-over speed ${v.toFixed(2)}x…`; } },
+      { id:'sync_voice', desc:'Sync captions to the uploaded voice-over timing (needs a Groq key already saved).',
+        examples:['sync it','sync kar do','sync captions to the voice'],
+        run(){ if(!groqKeyInput.value.trim()) return 'No Groq API key saved yet — add one in the voice-over panel first.'; syncVoiceBtn.click(); return 'Syncing captions to the voice-over…'; } },
+      { id:'set_music_volume', desc:'Set background music volume 0-100. args:{percent:number}',
+        examples:['music volume 30','background music thora kam karo'],
+        run(a){ const v=clamp(Math.round(+a.percent),0,100); bgMusicVolRange.value=v; bgMusicVolume=v/100; if(bgMusicVolRange.dispatchEvent) bgMusicVolRange.dispatchEvent(new Event('input')); return `Music volume ${v}%.`; } },
+
+      { id:'export_video', desc:'Generate/export the final video (equivalent to clicking Generate video).',
+        examples:['export the video','generate video','video banao'],
+        run(){ if(genBtn.disabled) return 'Not ready to export yet — load all 10 images, captions, and card text first.'; genBtn.click(); return 'Exporting…'; } },
+
+      { id:'clear_image', desc:'Remove/clear a specific (or currently active) image slot. args:{imageIndex:number(1-based,optional)}',
+        examples:['delete this image','remove image 5','ye image hata do'],
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active.'; images[i]=null; renderTray(); renderCaptions(); updateGenState(); refreshAll(); return `Image ${i+1} cleared.`; } },
+
+      { id:'help', desc:'Open the Voice Commands sheet listing everything that can be said.',
+        examples:['what can I say','help','what can you control'],
+        run(){ openVoiceSheet(); return 'Here is what you can say.'; } },
+      { id:'unknown', desc:'Use this ONLY if the command genuinely cannot be matched to any action above, or is ambiguous (e.g. "increase it" with nothing currently active). args:{reason:string, question:string(a short clarifying question to ask the user)}',
+        examples:[], run(a){ return a.question || a.reason || "Sorry, I didn't catch a clear command."; } },
+    ];
+
+    // ---------- build the sheet ----------
+    function openVoiceSheet(){
+      voiceSheetBody.innerHTML = ACTIONS.filter(a=>a.id!=='unknown').map(a=>`
+        <div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line);">
+          <div style="color:var(--green-bright);font-weight:600;margin-bottom:3px;">${a.id.replace(/_/g,' ')}</div>
+          <div style="color:rgba(242,240,230,0.6);margin-bottom:5px;">${a.desc.replace(/\s*args:.*$/,'')}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;">
+            ${a.examples.map(ex=>`<span style="background:#0d0f0c;border:1px solid var(--line);border-radius:3px;padding:3px 6px;font-size:10.5px;">"${ex}"</span>`).join('')}
+          </div>
+        </div>`).join('');
+      voiceSheetOverlay.style.display = 'flex';
+    }
+    voiceHelpBtn.addEventListener('click', openVoiceSheet);
+    voiceSheetClose.addEventListener('click', ()=> voiceSheetOverlay.style.display='none');
+    voiceSheetOverlay.addEventListener('click', e=>{ if(e.target===voiceSheetOverlay) voiceSheetOverlay.style.display='none'; });
+
+    // ---------- Groq NL -> intent ----------
+    function buildContext(){
+      return {
+        currentTimeSec: +previewT.toFixed(2),
+        totalDurationSec: +totalDuration().toFixed(2),
+        playing,
+        activeSegmentType: activeSegType(previewT),
+        activeImageIndex1Based: (activeIdx()!=null ? activeIdx()+1 : null),
+        activeCaptionText: currentCapIndex()!=null ? captions[currentCapIndex()] : null,
+        hookDurSec: hookDur, cardDurSec: cardDur, cardPosAfterImage: cardPos,
+        cardText: cardTextInput.value,
+        hookCaptionText,
+        capFontSize, hookCapFontSize, cardFontSize,
+        voiceOverSpeed: +voiceSpeedRange.value||1,
+        musicVolumePercent: Math.round((bgMusicVolume||0)*100),
+        imagesLoaded: images.map(x=>!!x),
+        imageDurationsSec: showDur,
+      };
+    }
+
+    // compact action list for the prompt — id + one-line desc only, no examples, no verbose args prose
+    const ACTIONS_SPEC = ACTIONS.filter(a=>a.id!=='unknown').map(a=>`${a.id}: ${a.desc}`).join('\n');
+
+    async function interpretCommand(transcript){
+      const apiKey = geminiKeyInput.value.trim();
+      if(!apiKey) return { action:'unknown', args:{ question:'No Gemini API key saved yet — paste one in the voice panel first.' } };
+      const ctx = buildContext();
+      // keep the prompt short: compact context, no whitespace, action list built once
+      const sys = `You control a video editor by converting spoken commands (English/Urdu/Roman Urdu/mixed, often rough) into ONE action.\nActions:\n${ACTIONS_SPEC}\nunknown: use only if genuinely ambiguous; args:{question}\nState:${JSON.stringify(ctx)}\nReply with ONLY JSON: {"action":"<id>","args":{...}}. No prose, no markdown.`;
+      let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts:[{ text: sys }] },
+          contents: [{ role:'user', parts:[{ text: transcript }] }],
+          generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 300 }
+        })
+      });
+      if(res.status===404){
+        // model id renamed/retired again — Google keeps this alias pointed at their current small/fast model
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts:[{ text: sys }] },
+            contents: [{ role:'user', parts:[{ text: transcript }] }],
+            generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 300 }
+          })
+        });
+      }
+      if(!res.ok){
+        const bodyTxt = await res.text().catch(()=> '');
+        throw new Error(`Gemini error ${res.status}${bodyTxt ? ' — '+bodyTxt.slice(0,150) : ''}`);
+      }
+      const data = await res.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+      let parsed;
+      try{ parsed = JSON.parse(raw); }
+      catch(e){
+        const match = raw.match(/\{[\s\S]*\}/);
+        try{ parsed = JSON.parse(match ? match[0] : raw); }
+        catch(e2){ parsed = { action:'unknown', args:{ question:"Didn't understand that — try again." } }; }
+      }
+      return parsed;
+    }
+
+    async function runCommand(transcript){
+      voiceHeard.textContent = `"${transcript}"`;
+      say('Thinking…');
+      try{
+        const { action, args } = await interpretCommand(transcript);
+        const act = ACTIONS.find(a=>a.id===action) || ACTIONS.find(a=>a.id==='unknown');
+        const msg = act.run(args||{});
+        say(msg, true);
+      } catch(err){
+        console.error('voice command failed', err);
+        say(err.message || 'Command failed.', false);
+      }
+    }
+
+    // ---------- speech capture (Web Speech API) ----------
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognizer = null, listening = false;
+    function ensureRecognizer(){
+      if(!SR) return null;
+      if(recognizer) return recognizer;
+      recognizer = new SR();
+      recognizer.continuous = false;
+      recognizer.interimResults = true;
+      recognizer.maxAlternatives = 1;
+      recognizer.addEventListener('result', e=>{
+        let finalText = '';
+        for(let i=e.resultIndex;i<e.results.length;i++){
+          const r = e.results[i];
+          voiceHeard.textContent = `"${r[0].transcript}"`;
+          if(r.isFinal) finalText = r[0].transcript;
+        }
+        if(finalText) runCommand(finalText.trim());
+      });
+      recognizer.addEventListener('end', ()=>{
+        listening = false;
+        voiceCtrlBtn.style.background = '#1a1a16';
+        voiceStateLabel.textContent = 'Voice control';
+      });
+      recognizer.addEventListener('error', e=>{
+        listening = false;
+        voiceCtrlBtn.style.background = '#1a1a16';
+        say(`Mic error: ${e.error}`, false);
+      });
+      return recognizer;
+    }
+
+    // The mic permission prompt itself is the browser's own doing — it can't be skipped by code.
+    // What CAN be avoided is re-prompting: once granted, the browser remembers it per-origin and
+    // won't ask again on this device, UNLESS the page is opened via file:// (each file open can
+    // count as a fresh origin/session in some browsers). Serving this file over http/https (even
+    // a local server) makes the "allow" stick permanently, same as any other site.
+    let micGranted = localStorage.getItem('voiceMicGranted') === '1';
+    async function prewarmMic(){
+      if(micGranted) return true;
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        stream.getTracks().forEach(t=>t.stop());
+        micGranted = true;
+        localStorage.setItem('voiceMicGranted','1');
+        return true;
+      }catch(e){ return false; }
+    }
+
+    voiceCtrlBtn.addEventListener('click', async ()=>{
+      voicePanel.style.display = 'block';
+      const rec = ensureRecognizer();
+      if(!rec){ say('Speech recognition is not supported in this browser — try Chrome.', false); return; }
+      if(listening){ rec.stop(); return; }
+      const ok = await prewarmMic();
+      if(!ok){ say('Mic permission was denied — allow it in the browser\'s site settings.', false); return; }
+      rec.lang = voiceLangSelect.value;
+      listening = true;
+      voiceCtrlBtn.style.background = 'var(--green)';
+      voiceStateLabel.textContent = 'Listening…';
+      voiceHeard.textContent = '';
+      say('');
+      try{ rec.start(); } catch(e){ /* already started */ }
+    });
+  })();
+  // ================= END VOICE CONTROL LAYER =================
 
   refreshAll();
 })();
