@@ -754,12 +754,18 @@
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1Z" fill="currentColor"/><path d="M4 7.5a.5.5 0 0 0-1 0 5 5 0 0 0 4.5 4.975V14H6a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1H8.5v-1.525A5 5 0 0 0 13 7.5a.5.5 0 0 0-1 0 4 4 0 0 1-8 0Z" fill="currentColor"/></svg>
       </button>
       <button type="button" id="voiceHelpBtn" title="Voice commands — what can I say?" style="width:32px;height:32px;border-radius:50%;background:#1a1a16;border:1px solid var(--line);color:var(--paper);cursor:pointer;font-size:12px;flex:0 0 auto;margin-left:4px;">?</button>
+      <button type="button" id="voiceUndoBtn" title="Undo last voice edit" style="width:32px;height:32px;border-radius:50%;background:#1a1a16;border:1px solid var(--line);color:var(--paper);cursor:pointer;font-size:13px;flex:0 0 auto;margin-left:4px;">↶</button>
+      <button type="button" id="voiceRedoBtn" title="Redo" style="width:32px;height:32px;border-radius:50%;background:#1a1a16;border:1px solid var(--line);color:var(--paper);cursor:pointer;font-size:13px;flex:0 0 auto;margin-left:4px;">↷</button>
+      <button type="button" id="historyBtn" title="Action history" style="width:32px;height:32px;border-radius:50%;background:#1a1a16;border:1px solid var(--line);color:var(--paper);cursor:pointer;font-size:12px;flex:0 0 auto;margin-left:4px;">🕘</button>
     </div>
   </div>
 
   <div id="voicePanel" style="display:none;position:fixed;left:12px;bottom:12px;z-index:9999;width:280px;max-width:calc(100vw - 24px);background:#101210;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--paper);box-shadow:0 8px 30px rgba(0,0,0,0.5);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <span id="voiceStateLabel" style="color:var(--green-bright);">Voice control</span>
+      <span style="display:flex;align-items:center;gap:6px;">
+        <span id="voiceStateDot" style="width:8px;height:8px;border-radius:50%;background:rgba(242,240,230,0.3);flex:0 0 auto;transition:background .15s;"></span>
+        <span id="voiceStateLabel" style="color:var(--green-bright);">Voice control</span>
+      </span>
       <select id="voiceLangSelect" style="background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:10px;border-radius:3px;padding:2px 4px;">
         <option value="en-US">English / Roman Urdu</option>
         <option value="ur-PK">Urdu (script)</option>
@@ -767,7 +773,19 @@
     </div>
     <div id="voiceHeard" style="min-height:14px;color:rgba(242,240,230,0.55);margin-bottom:4px;word-break:break-word;"></div>
     <div id="voiceResult" style="min-height:14px;word-break:break-word;margin-bottom:6px;"></div>
+    <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;color:rgba(242,240,230,0.6);cursor:pointer;">
+      <input type="checkbox" id="voiceTtsToggle" style="margin:0;"> Speak responses aloud
+    </label>
     <input type="password" id="geminiKeyInput" placeholder="Gemini API key (AIza...)" style="width:100%;box-sizing:border-box;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:10px;border-radius:3px;padding:5px 6px;">
+  </div>
+
+  <div id="historyPanel" style="display:none;position:fixed;right:12px;bottom:12px;z-index:9999;width:280px;max-width:calc(100vw - 24px);max-height:60vh;background:#101210;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--paper);box-shadow:0 8px 30px rgba(0,0,0,0.5);display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex:0 0 auto;">
+      <span style="color:var(--green-bright);">Action history</span>
+      <button type="button" id="historyCloseBtn" style="background:none;border:none;color:var(--paper);cursor:pointer;font-size:13px;">✕</button>
+    </div>
+    <div id="historyList" style="overflow-y:auto;flex:1 1 auto;display:flex;flex-direction:column-reverse;gap:4px;"></div>
+    <div style="font-size:9.5px;color:rgba(242,240,230,0.4);margin-top:8px;flex:0 0 auto;">Say "undo", "redo", or "undo the last two changes" — or click ↶/↷ above.</div>
   </div>
 
   <div class="modal-overlay" id="voiceSheetOverlay" style="display:none;">
@@ -5099,14 +5117,26 @@
   });
 
   // ================= VOICE CONTROL LAYER =================
+  // Architecture: voice -> LLM -> structured action(s) -> editor validates & executes
+  // -> action saved to undo/redo history -> updated context available for next command.
+  // The LLM NEVER touches the DOM/state directly — it only ever returns {action,args}
+  // (or a list of them for compound commands) from a fixed registry (ACTIONS below).
   (function(){
     const voiceCtrlBtn = document.getElementById('voiceCtrlBtn');
     const voiceHelpBtn = document.getElementById('voiceHelpBtn');
+    const voiceUndoBtn = document.getElementById('voiceUndoBtn');
+    const voiceRedoBtn = document.getElementById('voiceRedoBtn');
+    const historyBtn = document.getElementById('historyBtn');
+    const historyPanel = document.getElementById('historyPanel');
+    const historyCloseBtn = document.getElementById('historyCloseBtn');
+    const historyList = document.getElementById('historyList');
     const voicePanel = document.getElementById('voicePanel');
     const voiceStateLabel = document.getElementById('voiceStateLabel');
+    const voiceStateDot = document.getElementById('voiceStateDot');
     const voiceHeard = document.getElementById('voiceHeard');
     const voiceResult = document.getElementById('voiceResult');
     const voiceLangSelect = document.getElementById('voiceLangSelect');
+    const voiceTtsToggle = document.getElementById('voiceTtsToggle');
     const voiceSheetOverlay = document.getElementById('voiceSheetOverlay');
     const voiceSheetClose = document.getElementById('voiceSheetClose');
     const voiceSheetBody = document.getElementById('voiceSheetBody');
@@ -5117,83 +5147,290 @@
     voiceLangSelect.value = localStorage.getItem('voiceCtrlLang') || 'en-US';
     voiceLangSelect.addEventListener('change', ()=> localStorage.setItem('voiceCtrlLang', voiceLangSelect.value));
 
+    voiceTtsToggle.checked = localStorage.getItem('voiceTtsOn') === '1';
+    voiceTtsToggle.addEventListener('change', ()=> localStorage.setItem('voiceTtsOn', voiceTtsToggle.checked ? '1':'0'));
+
     // ---------- helpers reused from the existing editor state ----------
     function activeIdx(){ return activeShowIdx(previewT); }
     function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-    function say(msg, ok){ voiceResult.style.color = ok===false ? '#e0866a' : 'var(--green-bright)'; voiceResult.textContent = msg; }
+    function stripPunct(s){ return (s||'').replace(/[.,!?;:]+/g,'').replace(/\s{2,}/g,' ').trim(); }
     function currentCapIndex(){
       const t = activeSegType(previewT);
       if(t === 'show') return activeIdx();
       return null; // hook/card don't use the captions[] array
     }
-    function stripPunct(s){ return (s||'').replace(/[.,!?;:]+/g,'').replace(/\s{2,}/g,' ').trim(); }
+
+    // ---------- voice-status indicator: Listening -> Understanding -> Executing -> Done ----------
+    const PHASES = {
+      idle:       { label:'Voice control', color:'rgba(242,240,230,0.3)' },
+      listening:  { label:'Listening…',    color:'#0a84ff' },
+      understanding:{ label:'Understanding…', color:'#ffd60a' },
+      executing:  { label:'Executing…',    color:'#ff9500' },
+      done:       { label:'Done',          color:'var(--green-bright)' },
+    };
+    function setPhase(p){
+      const cfg = PHASES[p] || PHASES.idle;
+      voiceStateLabel.textContent = cfg.label;
+      voiceStateDot.style.background = cfg.color;
+    }
+
+    // ---------- text-to-speech: Claude/editor speaks back ----------
+    function speak(text, {interrupt=true} = {}){
+      if(!voiceTtsToggle.checked || !text) return Promise.resolve();
+      if(!('speechSynthesis' in window)) return Promise.resolve();
+      return new Promise(resolve=>{
+        if(interrupt) window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = (voiceLangSelect.value === 'ur-PK') ? 'ur-PK' : 'en-US';
+        u.rate = 1.05;
+        u.onend = ()=> resolve();
+        u.onerror = ()=> resolve();
+        // pause the mic while we talk so it doesn't hear itself
+        micPausedForTts = true;
+        if(sessionActive && recognizer){ try{ recognizer.stop(); }catch(e){} }
+        window.speechSynthesis.speak(u);
+      });
+    }
+
+    function say(msg, ok, {spoken=true} = {}){
+      voiceResult.style.color = ok===false ? '#e0866a' : 'var(--green-bright)';
+      voiceResult.textContent = msg;
+      if(spoken) speak(msg);
+    }
+
+    // ============ UNDO / REDO — generic state snapshot system ============
+    // Every voice edit captures a full "before" and "after" snapshot of the
+    // fields it's allowed to touch. Undo restores "before", redo restores
+    // "after". This works uniformly for every action without hand-written
+    // per-action undo logic, and is what powers "undo", "undo the last two
+    // changes", "redo", and "actually make it 0.1 instead" (which just reads
+    // the last matching entry back out of history).
+    function snapshotState(){
+      return {
+        hookDur, cardDur, cardPos,
+        cardText: cardTextInput.value,
+        hookCaptionText,
+        captions: captions.slice(),
+        showDur: showDur.slice(),
+        capFontSize, hookCapFontSize, cardFontSize,
+        capTextColor: {...capTextColor},
+        cardTextColor,
+        hookWordByWord, showWordByWord,
+        captionPos: {...captionPos},
+        hookCaptionPos: {...hookCaptionPos},
+        capPosOverride: capPosOverride.map(p=>p?{...p}:null),
+        voiceOverSpeed: +voiceSpeedRange.value || 1,
+        musicVolumePercent: Math.round((bgMusicVolume||0)*100),
+        images: images.slice(), // shallow — same {file,url,img} refs, cheap & sufficient
+      };
+    }
+    function restoreState(snap){
+      hookDur = snap.hookDur; hookDurRange.value = hookDur; hookDurNum.value = hookDur.toFixed(2);
+      cardDur = snap.cardDur; cardDurRange.value = cardDur; cardDurNum.value = cardDur.toFixed(2);
+      cardPos = snap.cardPos; cardPosSelect.value = cardPos;
+      cardTextInput.value = snap.cardText;
+      hookCaptionText = snap.hookCaptionText; hookCapText.value = hookCaptionText;
+      captions = snap.captions.slice();
+      showDur = snap.showDur.slice();
+      capFontSize = snap.capFontSize; capSizeVal.value = capFontSize;
+      hookCapFontSize = snap.hookCapFontSize; document.getElementById('hookCapSizeVal').value = hookCapFontSize;
+      cardFontSize = snap.cardFontSize; cardSizeVal.value = cardFontSize;
+      capTextColor = {...snap.capTextColor};
+      cardTextColor = snap.cardTextColor;
+      hookWordByWord = snap.hookWordByWord; hookWordToggle.checked = hookWordByWord;
+      showWordByWord = snap.showWordByWord; showWordToggle.checked = showWordByWord;
+      captionPos = {...snap.captionPos};
+      hookCaptionPos = {...snap.hookCaptionPos};
+      capPosOverride = snap.capPosOverride.map(p=>p?{...p}:null);
+      voiceSpeedRange.value = snap.voiceOverSpeed; voiceSpeedVal.textContent = snap.voiceOverSpeed.toFixed(2)+'x';
+      bgMusicVolume = snap.musicVolumePercent/100; bgMusicVolRange.value = snap.musicVolumePercent; bgMusicVolVal.textContent = snap.musicVolumePercent+'%';
+      images = snap.images.slice();
+      renderTray(); renderCaptions(); updateCapHandle(); updateGenState(); drawPreviewFrame(previewT); refreshAll();
+    }
+    function statesEqual(a,b){ return JSON.stringify(a)===JSON.stringify(b); }
+
+    let undoStack = [];   // {label, before, after}
+    let redoStack = [];
+    let activityLog = []; // everything shown in the Action History panel: {label, ts, kind}
+    let lastEdited = null; // {type:'image'|'caption'|'card'|'hook', index?} — what the last edit touched
+
+    const MAX_HISTORY = 200;
+    function logActivity(label, kind){
+      activityLog.push({ label, ts: Date.now(), kind });
+      if(activityLog.length > MAX_HISTORY) activityLog.shift();
+      renderHistoryPanel();
+    }
+    function pushUndoEntry(label, before, after, touched){
+      undoStack.push({ label, before, after });
+      if(undoStack.length > MAX_HISTORY) undoStack.shift();
+      redoStack = [];
+      if(touched) lastEdited = touched;
+      logActivity(label, 'edit');
+    }
+    function undoSteps(n){
+      n = Math.max(1, Math.min(Math.round(n)||1, undoStack.length));
+      if(undoStack.length===0) return 'Nothing to undo.';
+      let label='';
+      for(let k=0;k<n;k++){
+        const entry = undoStack.pop();
+        if(!entry) break;
+        restoreState(entry.before);
+        redoStack.push(entry);
+        label = entry.label;
+      }
+      logActivity(n===1 ? `Undid: ${label}` : `Undid last ${n} changes`, 'undo');
+      return n===1 ? `Undone — back to before "${label}".` : `Undid the last ${n} changes.`;
+    }
+    function redoSteps(n){
+      n = Math.max(1, Math.min(Math.round(n)||1, redoStack.length));
+      if(redoStack.length===0) return 'Nothing to redo.';
+      let label='';
+      for(let k=0;k<n;k++){
+        const entry = redoStack.pop();
+        if(!entry) break;
+        restoreState(entry.after);
+        undoStack.push(entry);
+        label = entry.label;
+      }
+      logActivity(n===1 ? `Redid: ${label}` : `Redid last ${n} changes`, 'redo');
+      return n===1 ? `Redone — "${label}" is back.` : `Redid the last ${n} changes.`;
+    }
+
+    function renderHistoryPanel(){
+      if(activityLog.length===0){
+        historyList.innerHTML = `<div style="color:rgba(242,240,230,0.35);">No voice edits yet.</div>`;
+        return;
+      }
+      const KIND_COLOR = { edit:'var(--paper)', undo:'#e0866a', redo:'#7fd6ff' };
+      historyList.innerHTML = activityLog.slice(-40).map(e=>{
+        const t = new Date(e.ts);
+        const hh = String(t.getHours()).padStart(2,'0'), mm = String(t.getMinutes()).padStart(2,'0'), ss = String(t.getSeconds()).padStart(2,'0');
+        return `<div style="padding:5px 7px;border:1px solid var(--line);border-radius:4px;background:#0d0f0c;">
+          <div style="color:${KIND_COLOR[e.kind]||'var(--paper)'};">${e.label}</div>
+          <div style="color:rgba(242,240,230,0.35);font-size:9.5px;">${hh}:${mm}:${ss}</div>
+        </div>`;
+      }).join('');
+    }
+    historyBtn.addEventListener('click', ()=>{ historyPanel.style.display = historyPanel.style.display==='none' ? 'flex' : 'none'; });
+    historyCloseBtn.addEventListener('click', ()=> historyPanel.style.display='none');
+    voiceUndoBtn.addEventListener('click', ()=>{ const msg = undoSteps(1); say(msg, true); });
+    voiceRedoBtn.addEventListener('click', ()=>{ const msg = redoSteps(1); say(msg, true); });
+
+    // Runs one action through validation + execution + (if state-mutating) history capture.
+    // This is the ONLY place editor state gets touched as a result of a voice command —
+    // the LLM never manipulates the DOM/state directly, it only picks an action id + args
+    // from the fixed ACTIONS registry below, which the editor then validates and executes.
+    function execAction(act, args){
+      args = args || {};
+      if(act.undoable === false){
+        const msg = act.run(args);
+        return msg;
+      }
+      const before = snapshotState();
+      const msg = act.run(args);
+      const after = snapshotState();
+      if(statesEqual(before, after)) return msg; // nothing actually changed (e.g. a validation message) — don't log a no-op
+      const label = act.label ? act.label(args, msg) : act.id.replace(/_/g,' ');
+      const touched = act.touched ? act.touched(args) : null;
+      pushUndoEntry(label, before, after, touched);
+      return msg;
+    }
 
     // ---------- the action registry: every voice-controllable action ----------
-    // Each action: id, desc (for the LLM + sheet), examples (for the sheet), run(args)->string
+    // Each action: id, desc (for the LLM + sheet), examples (for the sheet),
+    // undoable (default true — false for playback/navigation/meta actions),
+    // label(args,result) -> short past-tense string for the Action History panel,
+    // touched(args) -> {type,index} of the element this edit targeted, so
+    // follow-up commands ("make it 0.1 instead") can resolve "it" correctly,
+    // run(args) -> string shown/spoken as the result.
     const ACTIONS = [
-      { id:'play', desc:'Start/resume playback from the current position.',
+      { id:'play', undoable:false, desc:'Start/resume playback from the current position.',
         examples:['play','play from here','resume'],
         run(){ if(loadedCount()<N) return 'Load all 10 images first.'; if(!playing) playBtn.click(); return 'Playing.'; } },
-      { id:'pause', desc:'Pause/stop playback (stays at current position).',
+      { id:'pause', undoable:false, desc:'Pause/stop playback (stays at current position).',
         examples:['pause','stop','stop playback','rok do'],
         run(){ if(playing) stopPreview(); return 'Paused.'; } },
-      { id:'seek', desc:'Seek/stop the playhead at an exact time in seconds. args:{seconds:number}',
+      { id:'seek', undoable:false, desc:'Seek/stop the playhead at an exact time in seconds. args:{seconds:number}',
         examples:['stop at 5.6 seconds','go to 3 seconds','seek to 10s','5.6 second par ruk jao'],
         run(a){ if(loadedCount()<N) return 'Load all 10 images first.'; const dur=totalDuration(); const t=clamp(+a.seconds||0,0,dur); if(playing) stopPreview(); drawPreviewFrame(t); timecode.textContent=`${t.toFixed(1)} / ${dur.toFixed(1)}s`; setProgress(dur?t/dur:0); return `Stopped at ${t.toFixed(1)}s.`; } },
-      { id:'seek_relative', desc:'Move the playhead forward/back by N seconds from current position. args:{deltaSeconds:number}',
+      { id:'seek_relative', undoable:false, desc:'Move the playhead forward/back by N seconds from current position. args:{deltaSeconds:number}',
         examples:['go forward 2 seconds','go back 1 second','2 second aage jao'],
         run(a){ const dur=totalDuration(); const t=clamp(previewT+(+a.deltaSeconds||0),0,dur); if(playing) stopPreview(); drawPreviewFrame(t); timecode.textContent=`${t.toFixed(1)} / ${dur.toFixed(1)}s`; setProgress(dur?t/dur:0); return `Now at ${t.toFixed(1)}s.`; } },
-      { id:'goto_start', desc:'Jump playhead to the very start (0s).', examples:['go to start','from the beginning','shuru se'],
+      { id:'goto_start', undoable:false, desc:'Jump playhead to the very start (0s).', examples:['go to start','from the beginning','shuru se'],
         run(){ if(playing) stopPreview(); drawPreviewFrame(0); setProgress(0); return 'At start.'; } },
-      { id:'goto_end', desc:'Jump playhead to the very end.', examples:['go to the end','last part'],
+      { id:'goto_end', undoable:false, desc:'Jump playhead to the very end.', examples:['go to the end','last part'],
         run(){ const dur=totalDuration(); if(playing) stopPreview(); drawPreviewFrame(dur); setProgress(1); return 'At end.'; } },
+
+      { id:'undo', undoable:false, desc:'Undo the last N voice edits (default 1). Use this for "undo", "undo that", "undo the last two changes", "put it back", "don\'t do that", "oh no", "revert", "wapas kar do", "wapas wesa hi kar do", or any command that cancels/reverses the previous edit. args:{count:number(optional, default 1)}',
+        examples:['undo','undo that','undo the last two changes','put it back','wapas kar do','don\'t increase it','oh no undo that'],
+        run(a){ return undoSteps(a.count||1); } },
+      { id:'redo', undoable:false, desc:'Redo the last N undone edits (default 1). args:{count:number(optional, default 1)}',
+        examples:['redo','redo that','do it again'],
+        run(a){ return redoSteps(a.count||1); } },
 
       { id:'set_hook_duration', desc:'Set the hook-flash duration per image, in seconds (0.1–1). args:{seconds:number}',
         examples:['set hook duration to 0.3 seconds','hook 0.5 second kar do'],
+        label(a){ return `Set hook duration to ${(+a.seconds).toFixed(2)}s`; },
         run(a){ const v=clamp(+a.seconds,0.1,1); hookDur=v; hookDurRange.value=v; hookDurNum.value=v.toFixed(2); refreshAll(); return `Hook duration set to ${v.toFixed(2)}s.`; } },
-      { id:'adjust_hook_duration', desc:'Increase/decrease hook-flash duration by a delta in seconds. args:{deltaSeconds:number}',
-        examples:['increase hook duration by 0.1','hook thora barhao'],
+      { id:'adjust_hook_duration', desc:'Increase/decrease hook-flash duration by a delta in seconds. Use for relative phrasing too — "a little longer"≈+0.15, "a little shorter"≈-0.15, "a lot longer"≈+0.4. args:{deltaSeconds:number}',
+        examples:['increase hook duration by 0.1','hook thora barhao','make the hook a little longer'],
+        label(a){ const d=+a.deltaSeconds||0; return `${d>=0?'Increased':'Decreased'} hook duration by ${Math.abs(d).toFixed(2)}s`; },
         run(a){ const v=clamp(hookDur+(+a.deltaSeconds||0),0.1,1); hookDur=v; hookDurRange.value=v; hookDurNum.value=v.toFixed(2); refreshAll(); return `Hook duration now ${v.toFixed(2)}s.`; } },
 
       { id:'set_card_duration', desc:'Set the keyword-card duration, in seconds (1–10). args:{seconds:number}',
         examples:['set card duration to 3.5 seconds','card 4 second kar do'],
+        label(a){ return `Set card duration to ${(+a.seconds).toFixed(2)}s`; },
         run(a){ const v=clamp(+a.seconds,1,10); cardDur=v; cardDurRange.value=v; cardDurNum.value=v.toFixed(2); refreshAll(); return `Card duration set to ${v.toFixed(2)}s.`; } },
-      { id:'adjust_card_duration', desc:'Increase/decrease card duration by delta seconds. args:{deltaSeconds:number}',
+      { id:'adjust_card_duration', desc:'Increase/decrease card duration by delta seconds. "a little"≈0.3, "a lot"≈1. args:{deltaSeconds:number}',
         examples:['increase card duration by 0.5','card ki duration ghata do'],
+        label(a){ const d=+a.deltaSeconds||0; return `${d>=0?'Increased':'Decreased'} card duration by ${Math.abs(d).toFixed(2)}s`; },
         run(a){ const v=clamp(cardDur+(+a.deltaSeconds||0),1,10); cardDur=v; cardDurRange.value=v; cardDurNum.value=v.toFixed(2); refreshAll(); return `Card duration now ${v.toFixed(2)}s.`; } },
       { id:'set_card_position', desc:'Move the keyword card to sit after image N (0 = right after hook, N = end). args:{afterImage:number}',
         examples:['put the card after image 3','card ko end mein le jao'],
+        label(a){ return `Moved card to after image ${Math.round(a.afterImage)}`; },
         run(a){ const v=clamp(Math.round(+a.afterImage),0,N); cardPos=v; cardPosSelect.value=v; refreshAll(); return `Card now after image ${v}.`; } },
 
-      { id:'set_image_duration', desc:'Set a specific image\'s on-screen duration in seconds. args:{imageIndex:number(1-based, omit for currently-shown image), seconds:number}',
+      { id:'set_image_duration', desc:'Set a specific image\'s on-screen duration in seconds. args:{imageIndex:number(1-based, omit to use current selection/context), seconds:number}',
         examples:['set image 3 duration to 2 seconds','is ki duration 2 second kar do'],
-        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active — say which image number.'; const v=clamp(+a.seconds,0.2,20); showDur[i]=v; renderCaptions(); refreshAll(); return `Image ${i+1} duration set to ${v.toFixed(2)}s.`; } },
-      { id:'adjust_image_duration', desc:'Increase/decrease a specific (or currently active) image\'s duration by delta seconds. args:{imageIndex:number(1-based,optional), deltaSeconds:number}',
-        examples:['increase this image duration by 0.3 seconds','is ki duration 0.3 second barha do','decrease image 2 by 0.5 seconds'],
-        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active — say which image number.'; const v=clamp(showDur[i]+(+a.deltaSeconds||0),0.2,20); showDur[i]=v; renderCaptions(); refreshAll(); return `Image ${i+1} duration now ${v.toFixed(2)}s.`; } },
+        label(a,res){ return res && !res.startsWith('No image') ? `Set Image ${a._i} duration to ${(+a.seconds).toFixed(2)}s` : res; },
+        touched(a){ return a._i ? {type:'image', index:a._i} : null; },
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : resolveTargetIndex('image'); if(i==null) return 'No image is currently active — say which image number.'; a._i=i+1; const v=clamp(+a.seconds,0.2,20); showDur[i]=v; renderCaptions(); refreshAll(); return `Image ${i+1} duration set to ${v.toFixed(2)}s.`; } },
+      { id:'adjust_image_duration', desc:'Increase/decrease a specific (or currently active/last-touched) image\'s duration by delta seconds. Relative phrasing: "a little longer"≈+0.2, "a little shorter"≈-0.2, "a lot longer"≈+0.5, "half a second longer"=+0.5. args:{imageIndex:number(1-based,optional), deltaSeconds:number}',
+        examples:['increase this image duration by 0.3 seconds','is ki duration 0.3 second barha do','decrease image 2 by 0.5 seconds','add about half a second','make it a little longer','actually make it 0.1 instead'],
+        label(a,res){ const d=+a.deltaSeconds||0; return `${d>=0?'Increased':'Decreased'} Image ${a._i} duration by ${Math.abs(d).toFixed(2)}s`; },
+        touched(a){ return a._i ? {type:'image', index:a._i} : null; },
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : resolveTargetIndex('image'); if(i==null) return 'No image is currently active — say which image number.'; a._i=i+1; const v=clamp(showDur[i]+(+a.deltaSeconds||0),0.2,20); showDur[i]=v; renderCaptions(); refreshAll(); return `Image ${i+1} duration now ${v.toFixed(2)}s.`; } },
 
-      { id:'set_caption_text', desc:'Set the caption text for a specific (or currently active) showcase image. args:{imageIndex:number(1-based,optional), text:string}',
+      { id:'set_caption_text', desc:'Set the caption text for a specific (or currently active/last-touched) showcase image. args:{imageIndex:number(1-based,optional), text:string}',
         examples:['set caption 2 to Best Deal Today','is ki caption change karo'],
-        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : currentCapIndex(); if(i==null) return 'No showcase caption is active right now.'; captions[i]=a.text||''; renderCaptions(); drawPreviewFrame(previewT); return `Caption ${i+1} updated.`; } },
+        label(a){ return `Set Caption ${a._i} text`; },
+        touched(a){ return a._i ? {type:'caption', index:a._i} : null; },
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : (currentCapIndex()!=null?currentCapIndex():resolveTargetIndex('caption')); if(i==null) return 'No showcase caption is active right now.'; a._i=i+1; captions[i]=a.text||''; renderCaptions(); drawPreviewFrame(previewT); return `Caption ${i+1} updated.`; } },
       { id:'remove_punctuation', desc:'Remove punctuation (full stops, commas etc) from the current/target caption or the card text. args:{imageIndex:number(1-based,optional), target:"caption"|"card"|"hook"(optional, default = whatever is active)}',
         examples:['remove the full stop','comma bhi remove karo','intro se full stop hatao','card text se comma nikal do'],
+        label(a){ return `Removed punctuation from ${a.target||'caption'}${a._i?' '+a._i:''}`; },
+        touched(a){ return a._i ? {type:'caption', index:a._i} : (a.target==='card'?{type:'card'}:a.target==='hook'?{type:'hook'}:null); },
         run(a){
           const target = a.target || activeSegType(previewT);
           if(target==='card'){ cardTextInput.value = stripPunct(cardTextInput.value); drawPreviewFrame(previewT); return 'Removed punctuation from the card text.'; }
           if(target==='hook'){ hookCaptionText = stripPunct(hookCaptionText); hookCapText.value = hookCaptionText; drawPreviewFrame(previewT); return 'Removed punctuation from the intro/hook caption.'; }
-          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : currentCapIndex();
+          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : (currentCapIndex()!=null?currentCapIndex():resolveTargetIndex('caption'));
           if(i==null) return 'No caption is active right now — say which image, or "card"/"hook".';
-          captions[i] = stripPunct(captions[i]); renderCaptions(); drawPreviewFrame(previewT);
+          a._i=i+1; captions[i] = stripPunct(captions[i]); renderCaptions(); drawPreviewFrame(previewT);
           return `Removed punctuation from caption ${i+1}.`;
         } },
       { id:'set_caption_font_size', desc:'Set showcase caption font size (10-90). args:{size:number}',
         examples:['make captions bigger, size 40','caption size 24 kar do'],
+        label(a){ return `Set caption size to ${Math.round(a.size)}`; },
         run(a){ const v=clamp(Math.round(+a.size),10,90); capFontSize=v; capSizeVal.value=v; drawPreviewFrame(previewT); return `Caption size ${v}.`; } },
-      { id:'adjust_caption_font_size', desc:'Increase/decrease showcase caption font size by delta. args:{delta:number}',
+      { id:'adjust_caption_font_size', desc:'Increase/decrease showcase caption font size by delta. "a little bigger"≈+4, "much bigger"≈+10. args:{delta:number}',
         examples:['make the caption bigger','caption chota karo'],
+        label(a){ const d=+a.delta||4; return `${d>=0?'Increased':'Decreased'} caption size by ${Math.abs(d)}`; },
         run(a){ const v=clamp(capFontSize+(+a.delta||4),10,90); capFontSize=v; capSizeVal.value=v; drawPreviewFrame(previewT); return `Caption size ${v}.`; } },
       { id:'set_caption_color', desc:'Set text color for a caption/word/card. args:{colorHex:string(e.g. "#ffffff" or "black"/"white"), imageIndex:number(1-based,optional), target:"caption"|"card"(optional)}',
-        examples:['make this word black','caption ko white kar do','card text red kar do'],
+        examples:['make this word black','caption ko white kar do','card text red kar do','make the word Extreme black'],
+        label(a){ return `Changed ${a.target==='card'?'card text':'Caption '+a._i} color`; },
+        touched(a){ return a._i ? {type:'caption', index:a._i} : (a.target==='card'?{type:'card'}:null); },
         run(a){
           let hex = (a.colorHex||'').trim().toLowerCase();
           const named = {black:'#000000',white:'#ffffff',red:'#ff3b30',green:'#34c759',blue:'#0a84ff',yellow:'#ffd60a',orange:'#ff9500',pink:'#ff2d78',purple:'#af52de'};
@@ -5201,17 +5438,24 @@
           if(!/^#[0-9a-f]{6}$/.test(hex)) return 'Could not understand that color.';
           const target = a.target || activeSegType(previewT);
           if(target==='card'){ cardTextColor = hex; drawPreviewFrame(previewT); return `Card text color set.`; }
-          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : currentCapIndex();
+          const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : (currentCapIndex()!=null?currentCapIndex():resolveTargetIndex('caption'));
           if(i==null) return 'No caption is active right now.';
-          capTextColor[i] = hex; renderCaptions(); drawPreviewFrame(previewT);
+          a._i=i+1; capTextColor[i] = hex; renderCaptions(); drawPreviewFrame(previewT);
           return `Caption ${i+1} color set.`;
         } },
       { id:'toggle_word_by_word', desc:'Turn word-by-word caption reveal on/off, for hook or showcase captions. args:{target:"hook"|"show", on:boolean}',
         examples:['turn on word by word for captions','hook mein word by word band karo'],
+        label(a){ return `Word-by-word ${a.on?'on':'off'} (${a.target||'show'})`; },
         run(a){ if(a.target==='hook'){ hookWordByWord=!!a.on; hookWordToggle.checked=hookWordByWord; } else { showWordByWord=!!a.on; showWordToggle.checked=showWordByWord; } drawPreviewFrame(previewT); return `Word-by-word ${a.on?'on':'off'} for ${a.target||'show'} captions.`; } },
-      { id:'move_caption_position', desc:'Nudge the active caption/card text position on screen. args:{direction:"up"|"down"|"left"|"right", amount:number(0..1 normalized, default 0.03)}',
-        examples:['move this caption up','move it down a bit','isay left kar do'],
+      { id:'move_caption_position', desc:'Nudge the active (or last-touched) caption/card text position on screen. "slightly"/"a little"≈0.02, default≈0.03, "a lot"≈0.08. args:{direction:"up"|"down"|"left"|"right", amount:number(0..1 normalized, optional), imageIndex:number(1-based,optional)}',
+        examples:['move this caption up','move it down a bit','isay left kar do','move it slightly up'],
+        label(a){ return `Moved ${a._what||'caption'} ${a.direction}`; },
+        touched(a){ return a._i ? {type:'caption', index:a._i} : null; },
         run(a){
+          const t = activeSegType(previewT);
+          let i = null;
+          if(t==='show'){ i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : (currentCapIndex()!=null?currentCapIndex():resolveTargetIndex('caption')); if(i!=null){ a._i=i+1; a._what=`Caption ${i+1}`; } }
+          else if(t==='hook'){ a._what='intro caption'; } else { a._what='card text'; }
           const pos = activePos(); const amt = a.amount || 0.03;
           if(a.direction==='up') pos.yNorm = clamp(pos.yNorm-amt,0.02,0.98);
           else if(a.direction==='down') pos.yNorm = clamp(pos.yNorm+amt,0.02,0.98);
@@ -5224,18 +5468,25 @@
 
       { id:'set_card_text', desc:'Set the keyword-card text. args:{text:string}',
         examples:['set the card text to Limited Stock','card pe likho Sale'],
+        label(a){ return `Set card text to "${a.text}"`; },
+        touched(){ return {type:'card'}; },
         run(a){ cardTextInput.value = a.text||''; drawPreviewFrame(previewT); return 'Card text updated.'; } },
 
-      { id:'replace_image', desc:'Open the file picker to replace a specific (or currently active) image slot. Cannot pick the file itself by voice — opens the dialog for the user. args:{imageIndex:number(1-based,optional)}',
+      { id:'replace_image', undoable:false, desc:'Open the file picker to replace a specific (or currently active) image slot. Cannot pick the file itself by voice — opens the dialog for the user. args:{imageIndex:number(1-based,optional)}',
         examples:['replace this image','ye image replace karo','change image 4'],
         run(a){
           const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx();
           if(i==null) return 'No image is currently active — say which image number.';
+          const before = snapshotState();
           const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
           inp.addEventListener('change', ()=>{
             const f = inp.files[0]; if(!f) return;
             const url = URL.createObjectURL(f); const img = new Image();
-            img.onload = ()=>{ images[i] = {file:f, url, img}; renderTray(); updateGenState(); computeAutoCardColor(); refreshAll(); };
+            img.onload = ()=>{
+              images[i] = {file:f, url, img}; renderTray(); updateGenState(); computeAutoCardColor(); refreshAll();
+              const after = snapshotState();
+              pushUndoEntry(`Replaced Image ${i+1}`, before, after, {type:'image', index:i+1});
+            };
             img.src = url;
           });
           inp.click();
@@ -5244,28 +5495,41 @@
 
       { id:'set_voiceover_speed', desc:'Set voice-over playback speed (0.5-2x, pitch preserved). args:{speed:number}',
         examples:['voice-over 1.15x kar do','set voice speed to 1.2'],
+        label(a){ return `Set voice-over speed to ${(+a.speed).toFixed(2)}x`; },
         run(a){ const v=clamp(+a.speed,0.5,2); voiceSpeedRange.value=v; voiceSpeedVal.textContent=v.toFixed(2)+'x'; voiceSpeedApplyBtn.click(); return `Applying voice-over speed ${v.toFixed(2)}x…`; } },
-      { id:'sync_voice', desc:'Sync captions to the uploaded voice-over timing (needs a Groq key already saved).',
+      { id:'sync_voice', undoable:false, desc:'Sync captions to the uploaded voice-over timing (needs a Groq key already saved).',
         examples:['sync it','sync kar do','sync captions to the voice'],
         run(){ if(!groqKeyInput.value.trim()) return 'No Groq API key saved yet — add one in the voice-over panel first.'; syncVoiceBtn.click(); return 'Syncing captions to the voice-over…'; } },
       { id:'set_music_volume', desc:'Set background music volume 0-100. args:{percent:number}',
         examples:['music volume 30','background music thora kam karo'],
-        run(a){ const v=clamp(Math.round(+a.percent),0,100); bgMusicVolRange.value=v; bgMusicVolume=v/100; if(bgMusicVolRange.dispatchEvent) bgMusicVolRange.dispatchEvent(new Event('input')); return `Music volume ${v}%.`; } },
+        label(a){ return `Set music volume to ${Math.round(a.percent)}%`; },
+        run(a){ const v=clamp(Math.round(+a.percent),0,100); bgMusicVolRange.value=v; bgMusicVolume=v/100; bgMusicVolVal.textContent=v+'%'; return `Music volume ${v}%.`; } },
 
-      { id:'export_video', desc:'Generate/export the final video (equivalent to clicking Generate video).',
+      { id:'export_video', undoable:false, desc:'Generate/export the final video (equivalent to clicking Generate video).',
         examples:['export the video','generate video','video banao'],
         run(){ if(genBtn.disabled) return 'Not ready to export yet — load all 10 images, captions, and card text first.'; genBtn.click(); return 'Exporting…'; } },
 
       { id:'clear_image', desc:'Remove/clear a specific (or currently active) image slot. args:{imageIndex:number(1-based,optional)}',
         examples:['delete this image','remove image 5','ye image hata do'],
-        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active.'; images[i]=null; renderTray(); renderCaptions(); updateGenState(); refreshAll(); return `Image ${i+1} cleared.`; } },
+        label(a){ return `Cleared Image ${a._i}`; },
+        run(a){ const i = a.imageIndex ? clamp(Math.round(a.imageIndex)-1,0,N-1) : activeIdx(); if(i==null) return 'No image is currently active.'; a._i=i+1; images[i]=null; renderTray(); renderCaptions(); updateGenState(); refreshAll(); return `Image ${i+1} cleared.`; } },
 
-      { id:'help', desc:'Open the Voice Commands sheet listing everything that can be said.',
+      { id:'help', undoable:false, desc:'Open the Voice Commands sheet listing everything that can be said.',
         examples:['what can I say','help','what can you control'],
         run(){ openVoiceSheet(); return 'Here is what you can say.'; } },
-      { id:'unknown', desc:'Use this ONLY if the command genuinely cannot be matched to any action above, or is ambiguous (e.g. "increase it" with nothing currently active). args:{reason:string, question:string(a short clarifying question to ask the user)}',
+      { id:'unknown', undoable:false, desc:'Use this ONLY if the command genuinely cannot be matched to any action above, or is ambiguous (e.g. "increase it" with nothing currently active or recently touched). args:{reason:string, question:string(a short clarifying question to ask the user)}',
         examples:[], run(a){ return a.question || a.reason || "Sorry, I didn't catch a clear command."; } },
     ];
+    const ACTIONS_BY_ID = Object.fromEntries(ACTIONS.map(a=>[a.id,a]));
+
+    // Resolves "it"/"this"/omitted target for indexed edits: prefer whatever the
+    // playhead is currently over, else fall back to the last thing a voice edit touched.
+    function resolveTargetIndex(type){
+      const i = activeIdx();
+      if(i!=null) return i;
+      if(lastEdited && (lastEdited.type===type || (type==='caption'&&lastEdited.type==='image')) && lastEdited.index) return lastEdited.index-1;
+      return null;
+    }
 
     // ---------- build the sheet ----------
     function openVoiceSheet(){
@@ -5300,25 +5564,68 @@
         musicVolumePercent: Math.round((bgMusicVolume||0)*100),
         imagesLoaded: images.map(x=>!!x),
         imageDurationsSec: showDur,
+        // context for follow-ups & "undo that" style commands
+        lastEditedElement: lastEdited,
+        undoAvailable: undoStack.length,
+        redoAvailable: redoStack.length,
+        recentActions: undoStack.slice(-6).map(e=>e.label),
       };
     }
 
     // compact action list for the prompt — id + one-line desc only, no examples, no verbose args prose
     const ACTIONS_SPEC = ACTIONS.filter(a=>a.id!=='unknown').map(a=>`${a.id}: ${a.desc}`).join('\n');
 
+    // ---------- fast path: instant local parsing for the highest-frequency, latency-critical
+    // commands (playback + undo/redo) so they never wait on a network round trip. Anything
+    // that doesn't match falls through to the LLM.
+    const WORDNUM = {one:1,two:2,three:3,four:4,five:5,six:6,ek:1,do:2,teen:3,char:4,paanch:5};
+    function localFastPath(t){
+      const s = t.trim().toLowerCase();
+      let m;
+      if(/^(undo|wapas kar do|wapas wesa hi kar do|wapas|purana kar do|put it back|revert( that| this)?|don'?t (do|increase|decrease|change) (it|that|this)|oh no( undo)?( that)?)$/.test(s))
+        return { action:'undo', args:{} };
+      if((m = s.match(/undo (?:the )?last (\d+|one|two|three|four|five|ek|do|teen|char|paanch) changes?/)))
+        return { action:'undo', args:{ count: WORDNUM[m[1]] || parseInt(m[1],10) || 1 } };
+      if(/^redo( that)?$|^do it again$/.test(s)) return { action:'redo', args:{} };
+      if((m = s.match(/redo (?:the )?last (\d+|one|two|three|four|five) changes?/)))
+        return { action:'redo', args:{ count: WORDNUM[m[1]] || parseInt(m[1],10) || 1 } };
+      if(/^(play|chalao|start|resume|play again|play from here)$/.test(s)) return { action:'play', args:{} };
+      if(/^(pause|stop|stop playback|rok do|ruk jao)$/.test(s)) return { action:'pause', args:{} };
+      if(/^(go to start|from the beginning|shuru se|start (over|se))$/.test(s)) return { action:'goto_start', args:{} };
+      if(/^(go to (the )?end|last part)$/.test(s)) return { action:'goto_end', args:{} };
+      if((m = s.match(/^go back ([\d.]+) seconds?$/))) return { action:'seek_relative', args:{ deltaSeconds: -parseFloat(m[1]) } };
+      if((m = s.match(/^go forward ([\d.]+) seconds?$/))) return { action:'seek_relative', args:{ deltaSeconds: parseFloat(m[1]) } };
+      if((m = s.match(/^(?:seek to|go to|stop at) ([\d.]+) seconds?$/))) return { action:'seek', args:{ seconds: parseFloat(m[1]) } };
+      if(/^(help|what can i say|what can you control)$/.test(s)) return { action:'help', args:{} };
+      return null;
+    }
+
     async function interpretCommand(transcript){
       const apiKey = geminiKeyInput.value.trim();
-      if(!apiKey) return { action:'unknown', args:{ question:'No Gemini API key saved yet — paste one in the voice panel first.' } };
+      if(!apiKey) return { actions:[{ action:'unknown', args:{ question:'No Gemini API key saved yet — paste one in the voice panel first.' } }] };
       const ctx = buildContext();
       // keep the prompt short: compact context, no whitespace, action list built once
-      const sys = `You control a video editor by converting spoken commands (English/Urdu/Roman Urdu/mixed, often rough) into ONE action.\nActions:\n${ACTIONS_SPEC}\nunknown: use only if genuinely ambiguous; args:{question}\nState:${JSON.stringify(ctx)}\nReply with ONLY JSON: {"action":"<id>","args":{...}}. No prose, no markdown.`;
+      const sys = `You control a video editor by converting spoken commands (English/Urdu/Roman Urdu/mixed, often rough, sometimes a follow-up to what was just said) into one or more structured actions.
+Actions:
+${ACTIONS_SPEC}
+unknown: use only if genuinely ambiguous with no usable context; args:{question}
+State + recent history + last-touched element (use these to resolve "it"/"this"/"same one", and to know what a bare "undo"/negation like "don't do that" should undo):
+${JSON.stringify(ctx)}
+Rules:
+- If the command is a SINGLE instruction, reply {"action":"<id>","args":{...}}.
+- If it is a COMPOUND instruction with multiple things to do (e.g. "make caption 4 0.3s longer, move it up, and make the word Extreme black"), reply {"actions":[{"action":"<id>","args":{...}}, ...]} in the order they should run.
+- If the person is clearly cancelling/reversing their own last request ("no don't", "oh no", "put it back", "undo", "wapas"), use the "undo" action even if they don't say the word "undo".
+- If the person says something like "actually make it X instead" right after an edit, reuse the SAME action id and target as the most relevant recent action, just with the new value.
+- For vague relative phrasing ("a little", "slightly", "a lot", "about half a second") pick a sensible concrete numeric delta yourself — don't ask for a number unless truly needed.
+- Only use "unknown" if there is no active element AND no relevant recent action to infer from.
+Reply with ONLY JSON. No prose, no markdown.`;
       let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${encodeURIComponent(apiKey)}`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({
           systemInstruction: { parts:[{ text: sys }] },
           contents: [{ role:'user', parts:[{ text: transcript }] }],
-          generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 300 }
+          generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 400 }
         })
       });
       if(res.status===404){
@@ -5329,7 +5636,7 @@
           body: JSON.stringify({
             systemInstruction: { parts:[{ text: sys }] },
             contents: [{ role:'user', parts:[{ text: transcript }] }],
-            generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 300 }
+            generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 400 }
           })
         });
       }
@@ -5346,31 +5653,59 @@
         try{ parsed = JSON.parse(match ? match[0] : raw); }
         catch(e2){ parsed = { action:'unknown', args:{ question:"Didn't understand that — try again." } }; }
       }
-      return parsed;
+      // normalize to {actions:[...]}
+      if(Array.isArray(parsed.actions)) return parsed;
+      return { actions:[ { action:parsed.action, args:parsed.args||{} } ] };
     }
 
     async function runCommand(transcript){
       voiceHeard.textContent = `"${transcript}"`;
-      say('Thinking…');
+      say('', true, {spoken:false});
+
+      // 1) instant local fast-path for playback/undo/redo — no network round trip
+      const fast = localFastPath(transcript);
+      if(fast){
+        setPhase('executing');
+        const act = ACTIONS_BY_ID[fast.action] || ACTIONS_BY_ID.unknown;
+        const msg = execAction(act, fast.args);
+        setPhase('done');
+        say(msg, true, {spoken: fast.action==='undo' || fast.action==='redo' || fast.action==='help'});
+        setTimeout(()=>{ if(sessionActive) setPhase('listening'); else setPhase('idle'); }, 900);
+        return;
+      }
+
+      // 2) otherwise, ask the LLM — supports single or compound actions
+      setPhase('understanding');
       try{
-        const { action, args } = await interpretCommand(transcript);
-        const act = ACTIONS.find(a=>a.id===action) || ACTIONS.find(a=>a.id==='unknown');
-        const msg = act.run(args||{});
-        say(msg, true);
+        const { actions } = await interpretCommand(transcript);
+        setPhase('executing');
+        const results = [];
+        for(const step of (actions||[])){
+          const act = ACTIONS_BY_ID[step.action] || ACTIONS_BY_ID.unknown;
+          results.push(execAction(act, step.args||{}));
+        }
+        setPhase('done');
+        const finalMsg = results.length>1 ? `Did ${results.length} things: ${results.join(' ')}` : (results[0] || 'Done.');
+        say(finalMsg, true);
       } catch(err){
         console.error('voice command failed', err);
+        setPhase('done');
         say(err.message || 'Command failed.', false);
+      } finally {
+        setTimeout(()=>{ if(sessionActive) setPhase('listening'); else setPhase('idle'); }, 1200);
       }
     }
 
-    // ---------- speech capture (Web Speech API) ----------
+    // ---------- speech capture (Web Speech API) — continuous session so the mic
+    // stays ready between commands ("play… stop… go back 0.5 seconds… play again"
+    // without re-clicking the button each time). ----------
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognizer = null, listening = false;
+    let recognizer = null, sessionActive = false, micPausedForTts = false;
     function ensureRecognizer(){
       if(!SR) return null;
       if(recognizer) return recognizer;
       recognizer = new SR();
-      recognizer.continuous = false;
+      recognizer.continuous = true;
       recognizer.interimResults = true;
       recognizer.maxAlternatives = 1;
       recognizer.addEventListener('result', e=>{
@@ -5383,16 +5718,34 @@
         if(finalText) runCommand(finalText.trim());
       });
       recognizer.addEventListener('end', ()=>{
-        listening = false;
-        voiceCtrlBtn.style.background = '#1a1a16';
-        voiceStateLabel.textContent = 'Voice control';
+        voiceCtrlBtn.style.background = sessionActive ? 'var(--green)' : '#1a1a16';
+        if(sessionActive && !micPausedForTts){
+          // continuous mode dropped (browser silence timeout) — quietly restart
+          setTimeout(()=>{ if(sessionActive){ try{ recognizer.start(); }catch(e){} } }, 250);
+        } else if(!sessionActive){
+          setPhase('idle');
+        }
       });
       recognizer.addEventListener('error', e=>{
-        listening = false;
+        if(e.error==='no-speech' || e.error==='aborted') return; // expected in continuous mode, ignore
+        sessionActive = false;
         voiceCtrlBtn.style.background = '#1a1a16';
-        say(`Mic error: ${e.error}`, false);
+        setPhase('idle');
+        say(`Mic error: ${e.error}`, false, {spoken:false});
       });
       return recognizer;
+    }
+
+    // resume mic once TTS finishes speaking
+    if('speechSynthesis' in window){
+      const _origSpeak = window.speechSynthesis.speak.bind(window.speechSynthesis);
+      // hook resume behavior via utterance end handled in speak() above; poll as a safety net
+      setInterval(()=>{
+        if(micPausedForTts && !window.speechSynthesis.speaking){
+          micPausedForTts = false;
+          if(sessionActive && recognizer){ try{ recognizer.start(); }catch(e){} }
+        }
+      }, 200);
     }
 
     // The mic permission prompt itself is the browser's own doing — it can't be skipped by code.
@@ -5415,20 +5768,23 @@
     voiceCtrlBtn.addEventListener('click', async ()=>{
       voicePanel.style.display = 'block';
       const rec = ensureRecognizer();
-      if(!rec){ say('Speech recognition is not supported in this browser — try Chrome.', false); return; }
-      if(listening){ rec.stop(); return; }
+      if(!rec){ say('Speech recognition is not supported in this browser — try Chrome.', false, {spoken:false}); return; }
+      if(sessionActive){ sessionActive = false; try{ rec.stop(); }catch(e){} voiceCtrlBtn.style.background = '#1a1a16'; setPhase('idle'); return; }
       const ok = await prewarmMic();
-      if(!ok){ say('Mic permission was denied — allow it in the browser\'s site settings.', false); return; }
+      if(!ok){ say('Mic permission was denied — allow it in the browser\'s site settings.', false, {spoken:false}); return; }
       rec.lang = voiceLangSelect.value;
-      listening = true;
+      sessionActive = true;
       voiceCtrlBtn.style.background = 'var(--green)';
-      voiceStateLabel.textContent = 'Listening…';
+      setPhase('listening');
       voiceHeard.textContent = '';
-      say('');
+      say('', true, {spoken:false});
       try{ rec.start(); } catch(e){ /* already started */ }
     });
+
+    renderHistoryPanel();
   })();
   // ================= END VOICE CONTROL LAYER =================
+
 
   refreshAll();
 })();
