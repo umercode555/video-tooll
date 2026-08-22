@@ -722,8 +722,6 @@
   <button type="button" id="openGalleryBtn" class="qb-btn qb-btn-alt">▤ Full gallery<span id="qbGalleryCount" class="qb-count" style="display:none;">0</span></button>
   <button type="button" id="openVoiceLibBtn" class="qb-btn qb-btn-alt">🎙 Voice library<span id="qbVoiceCount" class="qb-count" style="display:none;">0</span></button>
   <button type="button" id="openMusicLibBtn" class="qb-btn qb-btn-alt">🎵 Music library<span id="qbMusicCount" class="qb-count" style="display:none;">0</span></button>
-  <button type="button" id="openBatchBtn" class="qb-btn" style="border-color:var(--green-bright);">📦 Batch automation<span id="qbPackCount" class="qb-count" style="display:none;">0</span></button>
-  <button type="button" id="openReviewQueueBtn" class="qb-btn qb-btn-alt" style="background:#7a4e14;border-color:#7a4e14;">🗂 Review queue<span id="qbReviewCount" class="qb-count" style="display:none;">0</span></button>
 </div>
 
 <div class="main">
@@ -1140,76 +1138,6 @@
     <div id="musicList" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div id="musicEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No background music uploaded yet.</div>
   </div>
-</div>
-
-<div class="modal-overlay" id="batchModalOverlay">
-  <div class="modal-box" style="max-width:640px;">
-    <div class="modal-head">
-      <h2>Batch automation</h2>
-      <button type="button" class="modal-close" id="batchModalClose">✕</button>
-    </div>
-    <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
-      Upload a parent folder that contains one subfolder per pack (10 images + manifest.json each). Then pick a range and hit Start — each pack in range gets loaded, matched to an MP3, sped up, and synced automatically, using the exact same systems as the manual editor. Nothing renders/downloads yet — finished packs land in the Review queue for you to check before export. Safe to close the tab; reopening resumes unfinished packs instead of starting over.
-    </div>
-    <label for="batchFolderInput" class="drop" id="batchDropZone" style="padding:16px;margin-bottom:8px;">
-      <input type="file" id="batchFolderInput" webkitdirectory directory multiple>
-      <div class="dt">Select the parent folder of packs</div>
-      <div class="ds">each subfolder = one pack (images + manifest.json)</div>
-    </label>
-    <div id="batchUploadStatus" style="font-size:9.5px;color:var(--green-bright);margin-bottom:10px;min-height:12px;"></div>
-
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;border-top:1px solid var(--line);padding-top:10px;">
-      <div style="flex:1;min-width:90px;">
-        <label style="display:block;font-size:9.5px;margin-bottom:4px;">From pack #</label>
-        <input type="number" id="batchRangeStart" min="1" value="1" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
-      </div>
-      <div style="flex:1;min-width:90px;">
-        <label style="display:block;font-size:9.5px;margin-bottom:4px;">To pack #</label>
-        <input type="number" id="batchRangeEnd" min="1" value="1" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
-      </div>
-      <div style="flex:1;min-width:90px;">
-        <label style="display:block;font-size:9.5px;margin-bottom:4px;">Max V.O. speed</label>
-        <input type="number" id="batchMaxSpeed" min="0.5" max="2" step="0.01" value="1.12" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
-      </div>
-      <div style="flex:1;min-width:90px;">
-        <label style="display:block;font-size:9.5px;margin-bottom:4px;">Concurrent tabs</label>
-        <input type="number" id="batchConcurrency" min="1" max="6" step="1" value="3" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
-      </div>
-    </div>
-    <div style="font-size:9.5px;color:rgba(242,240,230,0.45);margin-bottom:10px;">Needs a saved Groq API key (Voice-over library panel) for the sync step.</div>
-
-    <div style="display:flex;gap:8px;margin-bottom:10px;">
-      <button type="button" id="batchStartBtn" class="align-btn" style="flex:1;background:var(--green-bright);color:#06120b;">▶ Start workflow</button>
-      <button type="button" id="batchPauseBtn" class="align-btn" style="display:none;">⏸ Pause</button>
-      <button type="button" id="batchResumeBtn" class="align-btn" style="display:none;">▶ Resume</button>
-    </div>
-    <div id="batchProgressBar" style="height:6px;border-radius:3px;background:rgba(242,240,230,0.1);overflow:hidden;margin-bottom:6px;display:none;">
-      <div id="batchProgressFill" style="height:100%;width:0%;background:var(--green-bright);transition:width .2s;"></div>
-    </div>
-    <div id="batchStatus" style="font-size:9.5px;color:rgba(242,240,230,0.7);margin-bottom:10px;min-height:12px;"></div>
-    <div id="batchList" style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;"></div>
-    <div id="batchEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No packs uploaded yet.</div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="reviewQueueModalOverlay">
-  <div class="modal-box" style="max-width:520px;">
-    <div class="modal-head">
-      <h2>Review queue</h2>
-      <button type="button" class="modal-close" id="reviewQueueModalClose">✕</button>
-    </div>
-    <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
-      Packs that finished matching + speed + sync automatically, waiting on you. Click one to load it into the editor, make any corrections, then hit "Reviewed — Good to go" down there to render, download, and move to the next.
-    </div>
-    <div id="reviewQueueList" style="display:flex;flex-direction:column;gap:4px;"></div>
-    <div id="reviewQueueEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">Nothing waiting for review yet.</div>
-  </div>
-</div>
-
-<div id="reviewBar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:500;background:#101210;border-top:1px solid var(--green-bright);padding:10px clamp(16px,4vw,40px);align-items:center;gap:10px;font-family:var(--mono);">
-  <span id="reviewBarLabel" style="font-size:11px;color:var(--green-bright);font-weight:800;flex:1;">Reviewing Pack —</span>
-  <button type="button" id="reviewSkipBtn" class="qb-btn">Skip for now</button>
-  <button type="button" id="reviewGoodBtn" class="qb-btn qb-btn-alt">✓ Reviewed — Good to go</button>
 </div>
 
 <div class="modal-overlay" id="playerOverlay" style="align-items:center;">
@@ -1989,8 +1917,8 @@
     voiceSpeedVal.textContent = (+voiceSpeedRange.value).toFixed(2) + 'x';
   });
 
-  async function runVoiceSpeedApply(){
-    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return false; }
+  voiceSpeedApplyBtn.addEventListener('click', async ()=>{
+    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return; }
     const speed = +voiceSpeedRange.value || 1;
     voiceSpeedApplyBtn.disabled = true;
     voiceSpeedStatus.style.color = '';
@@ -2017,17 +1945,14 @@
       voiceSpeedStatus.style.color = '#8fd19e';
       voiceSpeedStatus.textContent = `Done — voice-over is now ${speed.toFixed(2)}x speed, pitch unchanged.`;
       await saveTemplateToStorage();
-      return true;
     } catch(err){
       console.error(err);
       voiceSpeedStatus.style.color = '#e0866a';
       voiceSpeedStatus.textContent = err.message || 'Speed change failed.';
-      throw err;
     } finally {
       voiceSpeedApplyBtn.disabled = false;
     }
-  }
-  voiceSpeedApplyBtn.addEventListener('click', ()=> runVoiceSpeedApply().catch(()=>{}));
+  });
 
   voiceSpeedResetBtn.addEventListener('click', async ()=>{
     if(!originalAudioFile) return;
@@ -2121,12 +2046,12 @@
     return matchedIdxs;
   }
 
-  async function runSyncVoice(){
+  syncVoiceBtn.addEventListener('click', async ()=>{
     const apiKey = groqKeyInput.value.trim();
-    if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return false; }
-    if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return false; }
+    if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return; }
+    if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return; }
     const capTokensList = captions.map(c => (c||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean));
-    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return false; }
+    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return; }
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
@@ -2250,17 +2175,14 @@
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched?'var(--green-bright)':'#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched?'':' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
-      return true;
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
       syncStatus.textContent = err.message || 'Sync failed.';
-      throw err;
     } finally {
       syncVoiceBtn.disabled = false;
     }
-  }
-  syncVoiceBtn.addEventListener('click', ()=> runSyncVoice().catch(()=>{}));
+  });
 
   alignRow.querySelectorAll('.align-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -2576,7 +2498,7 @@
     return { hookItem, cardItem, rest };
   }
 
-  function applyManifest(items, imageFiles, root, onDone){
+  function applyManifest(items, imageFiles, root){
     // A manifest upload replaces the whole batch, not just the slots it
     // touches — otherwise old images/captions from a previous session
     // linger in the untouched slots.
@@ -2652,9 +2574,7 @@
       const extras = [hookItem?'hook':null, cardItem?'card':null].filter(Boolean).join(' + ');
       setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (extras?' (auto-filled '+extras+')':'') + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
       computeAutoCardColor();
-      if(typeof onDone === 'function') onDone({ loaded, missing });
     }
-    if(items.length === 0) finish();
   }
   ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
   ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
@@ -2675,7 +2595,7 @@
     findMatchStatus.textContent = msg;
   }
 
-  async function runFindMatch(){
+  findMatchBtn.addEventListener('click', async ()=>{
     findMatchBtn.disabled = true;
     findMatchResult.style.display = 'none';
     setFindMatchStatus('Starting…', true);
@@ -2722,9 +2642,7 @@
     if(link) link.addEventListener('click', e=>{ e.preventDefault(); openVoiceLibBtn.click(); });
 
     findMatchBtn.disabled = false;
-    return true;
-  }
-  findMatchBtn.addEventListener('click', runFindMatch);
+  });
 
   function renderTray(){
     tray.innerHTML = '';
@@ -2866,7 +2784,7 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 5;
+  const IDB_VERSION = 4;
   // ---------- schema note ----------
   // v3 stored the blob (mp4/mp3) INSIDE the same record as its metadata (name, date,
   // transcript, template…). Every list screen — gallery, voice-over library, music
@@ -2905,10 +2823,6 @@
         if(!db.objectStoreNames.contains('voiceoverBlobs')) db.createObjectStore('voiceoverBlobs', { keyPath:'id' });
         if(!db.objectStoreNames.contains('musicBlobs')) db.createObjectStore('musicBlobs', { keyPath:'id' });
         if(!db.objectStoreNames.contains('videoTemplates')) db.createObjectStore('videoTemplates', { keyPath:'id' });
-        // ---- batch automation stores ----
-        if(!db.objectStoreNames.contains('packs')) db.createObjectStore('packs', { keyPath:'id' }); // {id, order, name, manifest, images:[File], status, error, createdAt}
-        if(!db.objectStoreNames.contains('packTemplates')) db.createObjectStore('packTemplates', { keyPath:'id' }); // id === pack id; value === collectTemplate() output
-        if(!db.objectStoreNames.contains('automationMeta')) db.createObjectStore('automationMeta', { keyPath:'key' }); // singleton run state, key='run'
         if(ev.oldVersion > 0 && ev.oldVersion < 4){
           // migrate: pull the inline blob out of each existing record, into its new
           // sibling store, leaving lightweight metadata behind in the original store.
@@ -5175,7 +5089,6 @@
       genBtn.disabled = false;
       genBtn.textContent = 'Generate video';
       drawPreviewFrame(0);
-      document.dispatchEvent(new CustomEvent('hs:exportDone', { detail:{ ok:false, error: (err&&err.message)||'export failed' } }));
       return;
     }
 
@@ -5201,7 +5114,6 @@
       console.error('saving to gallery failed', err);
       showTmplStatus('Video downloaded but could not save to gallery.', true);
     }
-    document.dispatchEvent(new CustomEvent('hs:exportDone', { detail:{ ok:true, blob: finalBlob } }));
   });
 
   // ================= VOICE CONTROL LAYER =================
@@ -5873,466 +5785,6 @@ Reply with ONLY JSON. No prose, no markdown.`;
   })();
   // ================= END VOICE CONTROL LAYER =================
 
-
-  // ================= BATCH AUTOMATION + REVIEW QUEUE LAYER =================
-  // Everything below is additive — it drives the exact same functions/buttons the
-  // manual flow uses (applyManifest, runFindMatch, runVoiceSpeedApply, runSyncVoice,
-  // collectTemplate/applyTemplate, genBtn) and never touches the manual workflow itself.
-  (function(){
-    const params = new URLSearchParams(location.search);
-    const HEADLESS = params.get('headless') === '1';
-    const HEADLESS_PACK_ID = params.get('packId');
-
-    // ---- raw, uncached IDB helpers (packs/packTemplates get written from other
-    // iframes/tabs sharing the same origin's IndexedDB — idbGetAll's in-memory
-    // cache above is per-page-context and would go stale across those, so batch
-    // code always reads these two stores fresh, straight off a new transaction) ----
-    async function rawGetAll(store){
-      const db = await openDB();
-      return new Promise((res,rej)=>{
-        const tx = db.transaction(store,'readonly');
-        const req = tx.objectStore(store).getAll();
-        req.onsuccess = ()=>res(req.result||[]);
-        req.onerror = ()=>rej(req.error);
-      });
-    }
-    async function rawGet(store, key){
-      const db = await openDB();
-      return new Promise((res,rej)=>{
-        const tx = db.transaction(store,'readonly');
-        const req = tx.objectStore(store).get(key);
-        req.onsuccess = ()=>res(req.result||null);
-        req.onerror = ()=>rej(req.error);
-      });
-    }
-    async function rawPut(store, value){
-      const db = await openDB();
-      return new Promise((res,rej)=>{
-        const tx = db.transaction(store,'readwrite');
-        const req = tx.objectStore(store).put(value);
-        req.onsuccess = ()=>res(req.result);
-        req.onerror = ()=>rej(req.error);
-      });
-    }
-    async function rawDelete(store, key){
-      const db = await openDB();
-      return new Promise((res,rej)=>{
-        const tx = db.transaction(store,'readwrite');
-        const req = tx.objectStore(store).delete(key);
-        req.onsuccess = ()=>res();
-        req.onerror = ()=>rej(req.error);
-      });
-    }
-
-    async function getPack(id){ return rawGet('packs', id); }
-    async function putPack(p){ p.updatedAt = Date.now(); return rawPut('packs', p); }
-    async function getAllPacks(){ return (await rawGetAll('packs')).sort((a,b)=> a.order - b.order); }
-    async function getMeta(){ return (await rawGet('automationMeta', 'run')) || { key:'run', running:false, rangeStart:1, rangeEnd:1, maxSpeed:1.12, concurrency:3, activePackIds:[] }; }
-    async function putMeta(m){ m.key='run'; return rawPut('automationMeta', m); }
-
-    // =========================================================
-    // HEADLESS WORKER MODE — this exact document, loaded in a hidden iframe with
-    // ?headless=1&packId=N, drives one pack through steps 1-4 using its own private
-    // JS globals (images/captions/audioFile/etc live in THIS iframe's scope only —
-    // that's what guarantees packs can never bleed into each other, even when many
-    // run at once).
-    // =========================================================
-    if(HEADLESS){
-      (async function runHeadlessPack(){
-        const packId = HEADLESS_PACK_ID;
-        const reportDone = (status, error)=>{
-          try{ parent.postMessage({ type:'hs-pack-done', packId, status, error: error||null }, '*'); }catch(e){}
-        };
-        try{
-          await openDB(); // make sure schema/upgrade has run in this context too
-          const pack = await getPack(packId);
-          if(!pack) throw new Error('Pack not found (' + packId + ')');
-          pack.status = 'processing';
-          await putPack(pack);
-
-          const manifestItems = Array.isArray(pack.manifest && pack.manifest.items) ? pack.manifest.items : [];
-          const imageFiles = pack.images || [];
-          if(!manifestItems.length) throw new Error('manifest.json has no items');
-          if(!imageFiles.length) throw new Error('No images stored for this pack');
-
-          await new Promise((resolve, reject)=>{
-            try{ applyManifest(manifestItems, imageFiles, pack.manifest, ({missing})=>{
-              if(missing > 0) console.warn('Pack', packId, missing, 'image(s) not matched');
-              resolve();
-            }); } catch(err){ reject(err); }
-          });
-          await sleep(150); // let image onload thumbnails settle before reading state
-
-          await runFindMatch();
-          if(!audioFile) throw new Error('No matching MP3 found/assigned for this pack');
-
-          const targetSpeed = Math.max(0.5, Math.min(2, pack.maxSpeed || 1.12));
-          voiceSpeedRange.value = targetSpeed;
-          voiceSpeedRange.dispatchEvent(new Event('input'));
-          await runVoiceSpeedApply();
-
-          if(!groqKeyInput.value.trim()) throw new Error('No Groq API key saved — add one in the Voice-over library panel first');
-          await runSyncVoice();
-
-          const tpl = await collectTemplate();
-          await rawPut('packTemplates', { id: packId, template: tpl });
-
-          pack.status = 'awaiting_review';
-          pack.error = null;
-          pack.processedAt = Date.now();
-          await putPack(pack);
-          reportDone('awaiting_review');
-        } catch(err){
-          console.error('Headless pack failed', packId, err);
-          try{
-            const pack = await getPack(packId);
-            if(pack){ pack.status = 'error'; pack.error = (err && err.message) || String(err); await putPack(pack); }
-          } catch(e2){}
-          reportDone('error', (err && err.message) || String(err));
-        }
-      })();
-      return; // headless iframes render nothing else — the UI below is for the main tab
-    }
-
-    // =========================================================
-    // MAIN-TAB ORCHESTRATOR + UI (bulk upload, queue, review)
-    // =========================================================
-    const batchModalOverlay = document.getElementById('batchModalOverlay');
-    const batchModalClose = document.getElementById('batchModalClose');
-    const openBatchBtn = document.getElementById('openBatchBtn');
-    const batchFolderInput = document.getElementById('batchFolderInput');
-    const batchUploadStatus = document.getElementById('batchUploadStatus');
-    const batchRangeStart = document.getElementById('batchRangeStart');
-    const batchRangeEnd = document.getElementById('batchRangeEnd');
-    const batchMaxSpeed = document.getElementById('batchMaxSpeed');
-    const batchConcurrency = document.getElementById('batchConcurrency');
-    const batchStartBtn = document.getElementById('batchStartBtn');
-    const batchPauseBtn = document.getElementById('batchPauseBtn');
-    const batchResumeBtn = document.getElementById('batchResumeBtn');
-    const batchProgressBar = document.getElementById('batchProgressBar');
-    const batchProgressFill = document.getElementById('batchProgressFill');
-    const batchStatus = document.getElementById('batchStatus');
-    const batchList = document.getElementById('batchList');
-    const batchEmpty = document.getElementById('batchEmpty');
-    const qbPackCount = document.getElementById('qbPackCount');
-
-    const reviewQueueModalOverlay = document.getElementById('reviewQueueModalOverlay');
-    const reviewQueueModalClose = document.getElementById('reviewQueueModalClose');
-    const openReviewQueueBtn = document.getElementById('openReviewQueueBtn');
-    const reviewQueueList = document.getElementById('reviewQueueList');
-    const reviewQueueEmpty = document.getElementById('reviewQueueEmpty');
-    const qbReviewCount = document.getElementById('qbReviewCount');
-
-    const reviewBar = document.getElementById('reviewBar');
-    const reviewBarLabel = document.getElementById('reviewBarLabel');
-    const reviewGoodBtn = document.getElementById('reviewGoodBtn');
-    const reviewSkipBtn = document.getElementById('reviewSkipBtn');
-
-    openBatchBtn.addEventListener('click', ()=>{ batchModalOverlay.classList.add('on'); renderBatchList(); });
-    batchModalClose.addEventListener('click', ()=> batchModalOverlay.classList.remove('on'));
-    batchModalOverlay.addEventListener('click', e=>{ if(e.target===batchModalOverlay) batchModalOverlay.classList.remove('on'); });
-    openReviewQueueBtn.addEventListener('click', ()=>{ reviewQueueModalOverlay.classList.add('on'); renderReviewQueueList(); });
-    reviewQueueModalClose.addEventListener('click', ()=> reviewQueueModalOverlay.classList.remove('on'));
-    reviewQueueModalOverlay.addEventListener('click', e=>{ if(e.target===reviewQueueModalOverlay) reviewQueueModalOverlay.classList.remove('on'); });
-
-    // ---------- bulk pack upload ----------
-    // Expects one PARENT folder containing one subfolder per pack (10 images +
-    // manifest.json each) — same manifest.json shape the single-pack drop zone
-    // already understands (items:[{keyword,file}], optional INTRO_CAPTION/CTA_CAPTION).
-    batchFolderInput.addEventListener('change', async e=>{
-      const files = Array.from(e.target.files || []);
-      batchFolderInput.value = '';
-      if(!files.length) return;
-
-      const groups = new Map(); // subfolder name -> {manifestFile, imageFiles:[]}
-      for(const f of files){
-        const rel = f.webkitRelativePath || f.name;
-        const parts = rel.split('/');
-        if(parts.length < 2) continue; // skip stray files directly in the picked root
-        const packFolder = parts[1];
-        if(!groups.has(packFolder)) groups.set(packFolder, { manifestFile:null, imageFiles:[] });
-        const g = groups.get(packFolder);
-        if(/manifest(\s\(\d+\))?\.json$/i.test(f.name)) g.manifestFile = f;
-        else if(f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(f.name)) g.imageFiles.push(f);
-      }
-
-      if(!groups.size){ batchUploadStatus.style.color = '#e0574a'; batchUploadStatus.textContent = 'No pack subfolders found in that selection.'; return; }
-
-      batchUploadStatus.style.color = 'var(--green-bright)';
-      batchUploadStatus.textContent = 'Reading ' + groups.size + ' pack folder(s)…';
-
-      const existing = await getAllPacks();
-      let nextOrder = existing.reduce((m,p)=> Math.max(m, p.order||0), 0) + 1;
-      let added = 0, failed = 0;
-
-      const folderNames = Array.from(groups.keys()).sort((a,b)=> a.localeCompare(b, undefined, {numeric:true}));
-      for(const folderName of folderNames){
-        const g = groups.get(folderName);
-        if(!g.manifestFile){ failed++; continue; }
-        let manifestJson;
-        try{ manifestJson = JSON.parse(await g.manifestFile.text()); }
-        catch(err){ failed++; continue; }
-        if(!Array.isArray(manifestJson.items) || !manifestJson.items.length){ failed++; continue; }
-
-        const numMatch = folderName.match(/(\d+)/);
-        const order = numMatch ? parseInt(numMatch[1], 10) : nextOrder++;
-        const id = 'pack_' + order + '_' + folderName.replace(/[^a-z0-9]/gi,'').slice(0,24) + '_' + Date.now().toString(36);
-
-        await putPack({
-          id, order, name: folderName,
-          manifest: manifestJson,
-          images: g.imageFiles,
-          maxSpeed: parseFloat(batchMaxSpeed.value) || 1.12,
-          status: 'pending',
-          error: null,
-          createdAt: Date.now()
-        });
-        added++;
-      }
-
-      batchUploadStatus.style.color = added ? 'var(--green-bright)' : '#e0574a';
-      batchUploadStatus.textContent = added + ' pack(s) added' + (failed ? ', ' + failed + ' skipped (missing/broken manifest.json)' : '') + '.';
-      const all = await getAllPacks();
-      if(all.length){
-        batchRangeStart.value = Math.min(...all.map(p=>p.order));
-        batchRangeEnd.value = Math.max(...all.map(p=>p.order));
-      }
-      renderBatchList();
-      renderQuickbarCounts();
-    });
-
-    function packStatusDot(status){
-      const c = { pending:'rgba(242,240,230,0.3)', processing:'#e0a94a', awaiting_review:'#1fae66', complete:'#3d8bfd', error:'#e0574a' }[status] || '#666';
-      return `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:6px;"></span>`;
-    }
-
-    async function renderBatchList(){
-      const packs = await getAllPacks();
-      batchEmpty.style.display = packs.length ? 'none' : 'block';
-      batchList.innerHTML = packs.map(p => `
-        <div style="display:flex;align-items:center;gap:8px;font-size:10px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;">
-          ${packStatusDot(p.status)}
-          <span style="flex:1;">Pack ${p.order} — ${p.name}</span>
-          <span style="opacity:.6;text-transform:uppercase;">${p.status.replace('_',' ')}</span>
-        </div>`).join('');
-      renderQuickbarCounts();
-    }
-
-    async function renderQuickbarCounts(){
-      const packs = await getAllPacks();
-      qbPackCount.style.display = packs.length ? 'inline-block' : 'none';
-      qbPackCount.textContent = packs.length;
-      const reviewCount = packs.filter(p=>p.status==='awaiting_review').length;
-      qbReviewCount.style.display = reviewCount ? 'inline-block' : 'none';
-      qbReviewCount.textContent = reviewCount;
-    }
-
-    // ---------- orchestrator ----------
-    let queue = [];           // pending pack ids, in order
-    let activeIframes = new Map(); // iframe element -> packId
-    let stopRequested = false;
-
-    async function refreshProgressUI(){
-      const meta = await getMeta();
-      const packs = await getAllPacks();
-      const inRange = packs.filter(p => p.order >= meta.rangeStart && p.order <= meta.rangeEnd);
-      const done = inRange.filter(p => p.status==='awaiting_review' || p.status==='complete' || p.status==='error').length;
-      const total = inRange.length || 1;
-      batchProgressBar.style.display = meta.running || done>0 ? 'block' : 'none';
-      batchProgressFill.style.width = Math.round((done/total)*100) + '%';
-      const processing = inRange.filter(p=>p.status==='processing').length;
-      const errored = inRange.filter(p=>p.status==='error').length;
-      batchStatus.textContent = meta.running
-        ? `Running — ${processing} processing, ${done}/${total} done${errored?`, ${errored} failed`:''}.`
-        : (done>0 ? `Paused — ${done}/${total} done${errored?`, ${errored} failed`:''}. Resume to continue.` : '');
-      batchStartBtn.style.display = meta.running ? 'none' : 'inline-flex';
-      batchStartBtn.textContent = done>0 && done<total ? '▶ Resume workflow' : '▶ Start workflow';
-      batchPauseBtn.style.display = meta.running ? 'inline-flex' : 'none';
-      renderBatchList();
-    }
-
-    window.addEventListener('message', ev=>{
-      const data = ev.data;
-      if(!data || data.type !== 'hs-pack-done') return;
-      const entry = Array.from(activeIframes.entries()).find(([,pid])=> pid === data.packId);
-      if(!entry) return;
-      const [iframeEl] = entry;
-      activeIframes.delete(iframeEl);
-      iframeEl.remove();
-      refreshProgressUI();
-      renderReviewQueueList();
-      spawnNext();
-    });
-
-    async function spawnNext(){
-      const meta = await getMeta();
-      if(stopRequested || !meta.running) { await maybeFinishRun(); return; }
-      if(!queue.length){ await maybeFinishRun(); return; }
-      if(activeIframes.size >= (meta.concurrency || 3)) return;
-
-      const packId = queue.shift();
-      const pack = await getPack(packId);
-      if(!pack || pack.status !== 'pending'){ spawnNext(); return; }
-      pack.status = 'processing';
-      await putPack(pack);
-
-      const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;top:-9999px;';
-      iframe.src = location.pathname + '?headless=1&packId=' + encodeURIComponent(packId);
-      document.body.appendChild(iframe);
-      activeIframes.set(iframe, packId);
-      refreshProgressUI();
-
-      // keep filling remaining concurrency slots
-      spawnNext();
-    }
-
-    async function maybeFinishRun(){
-      if(activeIframes.size > 0) return; // still work in flight
-      const meta = await getMeta();
-      if(meta.running && !queue.length){
-        meta.running = false;
-        await putMeta(meta);
-      }
-      refreshProgressUI();
-    }
-
-    async function startOrResumeWorkflow(){
-      const rangeStart = Math.max(1, parseInt(batchRangeStart.value,10) || 1);
-      const rangeEnd = Math.max(rangeStart, parseInt(batchRangeEnd.value,10) || rangeStart);
-      const maxSpeed = Math.max(0.5, Math.min(2, parseFloat(batchMaxSpeed.value) || 1.12));
-      const concurrency = Math.max(1, Math.min(6, parseInt(batchConcurrency.value,10) || 3));
-
-      if(!groqKeyInput.value.trim()){
-        batchUploadStatus.style.color = '#e0574a';
-        batchUploadStatus.textContent = 'Add a Groq API key in the Voice-over library panel first — sync needs it.';
-        return;
-      }
-
-      const packs = await getAllPacks();
-      // crash-safety: anything still marked "processing" from a previous session
-      // that never got a chance to report back gets reset to pending here.
-      for(const p of packs){
-        if(p.status === 'processing'){ p.status = 'pending'; await putPack(p); }
-      }
-      const inRange = packs.filter(p => p.order >= rangeStart && p.order <= rangeEnd);
-      if(!inRange.length){
-        batchUploadStatus.style.color = '#e0574a';
-        batchUploadStatus.textContent = 'No uploaded packs fall inside that range.';
-        return;
-      }
-      // per-pack speed follows the currently configured max
-      for(const p of inRange){ if(p.maxSpeed !== maxSpeed){ p.maxSpeed = maxSpeed; await putPack(p); } }
-
-      await putMeta({ key:'run', running:true, rangeStart, rangeEnd, maxSpeed, concurrency });
-      stopRequested = false;
-      queue = inRange.filter(p=>p.status==='pending').map(p=>p.id);
-      batchUploadStatus.textContent = '';
-      refreshProgressUI();
-      for(let i=0;i<concurrency;i++) spawnNext();
-    }
-
-    batchStartBtn.addEventListener('click', startOrResumeWorkflow);
-    batchResumeBtn.addEventListener('click', startOrResumeWorkflow);
-    batchPauseBtn.addEventListener('click', async ()=>{
-      stopRequested = true;
-      const meta = await getMeta();
-      meta.running = false;
-      await putMeta(meta);
-      refreshProgressUI();
-    });
-
-    // resume automatically on load if a previous session left the workflow running
-    // (e.g. the tab/computer was closed mid-pack) — continues the unfinished packs
-    // in that same range instead of starting the whole batch over.
-    (async function autoResume(){
-      await sleep(300); // let openDB()/schema settle first
-      const meta = await getMeta();
-      if(!meta.running) { refreshProgressUI(); renderReviewQueueList(); renderQuickbarCounts(); return; }
-      batchRangeStart.value = meta.rangeStart;
-      batchRangeEnd.value = meta.rangeEnd;
-      batchMaxSpeed.value = meta.maxSpeed;
-      batchConcurrency.value = meta.concurrency;
-      const packs = await getAllPacks();
-      for(const p of packs){ if(p.status==='processing'){ p.status='pending'; await putPack(p); } }
-      const inRange = packs.filter(p => p.order >= meta.rangeStart && p.order <= meta.rangeEnd && p.status==='pending');
-      queue = inRange.map(p=>p.id);
-      stopRequested = false;
-      if(queue.length){
-        batchStatus.textContent = `Resuming — ${queue.length} pack(s) left from before.`;
-        for(let i=0;i<(meta.concurrency||3);i++) spawnNext();
-      } else {
-        meta.running = false; await putMeta(meta);
-      }
-      refreshProgressUI();
-      renderReviewQueueList();
-      renderQuickbarCounts();
-    })();
-
-    // ---------- review queue ----------
-    let currentReviewPackId = null;
-
-    async function renderReviewQueueList(){
-      const packs = (await getAllPacks()).filter(p=>p.status==='awaiting_review');
-      reviewQueueEmpty.style.display = packs.length ? 'none' : 'block';
-      reviewQueueList.innerHTML = packs.map(p => `
-        <button type="button" class="align-btn" data-open-review="${p.id}" style="display:flex;justify-content:space-between;text-align:left;">
-          <span>Pack ${p.order} — ${p.name}</span><span style="opacity:.6;">Open ›</span>
-        </button>`).join('');
-      reviewQueueList.querySelectorAll('[data-open-review]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{ reviewQueueModalOverlay.classList.remove('on'); openPackForReview(btn.dataset.openReview); });
-      });
-      renderQuickbarCounts();
-    }
-
-    async function openPackForReview(packId){
-      const rec = await rawGet('packTemplates', packId);
-      const pack = await getPack(packId);
-      if(!rec || !pack){ return; }
-      await applyTemplate(rec.template);
-      currentReviewPackId = packId;
-      reviewBar.style.display = 'flex';
-      reviewBarLabel.textContent = `Reviewing Pack ${pack.order} — ${pack.name}`;
-      reviewGoodBtn.disabled = false;
-      reviewGoodBtn.textContent = '✓ Reviewed — Good to go';
-      window.scrollTo({top:0, behavior:'smooth'});
-    }
-
-    async function openNextInReviewQueue(){
-      const packs = (await getAllPacks()).filter(p=>p.status==='awaiting_review');
-      if(packs.length){ await openPackForReview(packs[0].id); }
-      else { reviewBar.style.display = 'none'; currentReviewPackId = null; }
-      renderReviewQueueList();
-    }
-
-    reviewSkipBtn.addEventListener('click', ()=>{ reviewBar.style.display = 'none'; currentReviewPackId = null; });
-
-    reviewGoodBtn.addEventListener('click', ()=>{
-      if(!currentReviewPackId) return;
-      if(loadedCount() < N){ reviewBarLabel.textContent = 'Load all 10 images before exporting.'; return; }
-      reviewGoodBtn.disabled = true;
-      reviewGoodBtn.textContent = 'Rendering…';
-      genBtn.click(); // exact same render/export/download/gallery-save path as the manual "Generate video" button
-    });
-
-    document.addEventListener('hs:exportDone', async ev=>{
-      if(!currentReviewPackId) return;
-      const packId = currentReviewPackId;
-      if(ev.detail && ev.detail.ok){
-        const pack = await getPack(packId);
-        if(pack){ pack.status = 'complete'; pack.reviewedAt = Date.now(); await putPack(pack); }
-        await rawDelete('packTemplates', packId);
-        currentReviewPackId = null;
-        await openNextInReviewQueue();
-      } else {
-        reviewGoodBtn.disabled = false;
-        reviewGoodBtn.textContent = '✓ Reviewed — Good to go';
-        reviewBarLabel.textContent = 'Export failed — fix and try again, or Skip.';
-      }
-      renderBatchList();
-    });
-  })();
-  // ================= END BATCH AUTOMATION + REVIEW QUEUE LAYER =================
 
   refreshAll();
 })();
