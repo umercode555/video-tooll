@@ -722,6 +722,8 @@
   <button type="button" id="openGalleryBtn" class="qb-btn qb-btn-alt">▤ Full gallery<span id="qbGalleryCount" class="qb-count" style="display:none;">0</span></button>
   <button type="button" id="openVoiceLibBtn" class="qb-btn qb-btn-alt">🎙 Voice library<span id="qbVoiceCount" class="qb-count" style="display:none;">0</span></button>
   <button type="button" id="openMusicLibBtn" class="qb-btn qb-btn-alt">🎵 Music library<span id="qbMusicCount" class="qb-count" style="display:none;">0</span></button>
+  <button type="button" id="openBatchBtn" class="qb-btn" style="border-color:var(--green-bright);">📦 Batch automation<span id="qbPackCount" class="qb-count" style="display:none;">0</span></button>
+  <button type="button" id="openReviewQueueBtn" class="qb-btn qb-btn-alt" style="background:#7a4e14;border-color:#7a4e14;">🗂 Review queue<span id="qbReviewCount" class="qb-count" style="display:none;">0</span></button>
 </div>
 
 <div class="main">
@@ -798,41 +800,6 @@
     </div>
   </div>
 
-  <!-- compact numbered grid — one button per pack, colored by status. Replaces the
-       old 3-5-live-editor-cards view, which fell over past a handful of packs. -->
-  <div class="modal-overlay" id="batchGridOverlay" style="display:none;">
-    <div class="modal" style="max-width:min(1200px,96vw);width:96vw;max-height:92vh;overflow:auto;">
-      <div class="modal-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-        <h3 style="margin:0;" id="batchGridTitle">Pack grid</h3>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button type="button" id="batchDownloadAllBtn" class="align-btn" style="white-space:nowrap;">⬇ Download all packs</button>
-          <button type="button" class="modal-close" id="batchGridCloseBtn">✕</button>
-        </div>
-      </div>
-      <div id="batchGridSummary" style="font-family:var(--mono);font-size:11px;color:rgba(242,240,230,0.7);margin:8px 0 4px;"></div>
-      <div id="batchGridLegend" style="font-family:var(--mono);font-size:9px;color:rgba(242,240,230,0.5);margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap;"></div>
-      <div id="batchDownloadAllStatus" style="display:none;font-family:var(--mono);font-size:10.5px;color:var(--green-bright);margin:0 0 10px;"></div>
-      <div id="batchGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:8px;"></div>
-    </div>
-  </div>
-
-  <!-- single full editor, opened for exactly one pack at a time (same editor the
-       "Full Gallery" flow uses) — click a grid button, review/tweak, click
-       "Reviewed — Good to Go", it renders + downloads + drops you back at the grid. -->
-  <div class="modal-overlay" id="batchReviewOverlay" style="display:none;">
-    <div class="modal" style="max-width:min(480px,98vw);width:98vw;max-height:96vh;overflow:hidden;padding:0;display:flex;flex-direction:column;">
-      <div class="modal-head" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;margin:0;">
-        <h3 style="margin:0;font-size:12px;" id="batchReviewTitle">Pack</h3>
-        <button type="button" class="modal-close" id="batchReviewCloseBtn">✕ Back to grid</button>
-      </div>
-      <iframe id="batchReviewIframe" style="flex:1;border:none;background:#000;min-height:72vh;"></iframe>
-    </div>
-  </div>
-
-  <!-- headless — never shown. Runs the fixed pipeline (find mp3 → 1.12x speed →
-       sync → locked captions → default music) one pack at a time in the background. -->
-  <iframe id="batchPrepIframe" style="display:none;"></iframe>
-
   <div class="panel">
 
     <div class="field" id="tmplPanel" style="border:1px solid var(--green-bright);border-radius:6px;padding:12px;">
@@ -870,40 +837,6 @@
       <button type="button" id="findMatchBtn" style="width:100%;background:#1c2118;color:var(--green-bright);border:1px solid var(--green-bright);border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">🔎 Find matching MP3</button>
       <div id="findMatchStatus" style="font-size:9.5px;margin-bottom:6px;min-height:12px;"></div>
       <div id="findMatchResult" style="display:none;font-size:9.5px;color:rgba(242,240,230,0.7);margin-bottom:10px;line-height:1.5;"></div>
-
-      <div id="batchPanel" style="border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;cursor:pointer;" id="batchPanelToggle">
-          <div class="dt" style="color:var(--green-bright);">⚡ Bulk pack batch (100 packs → one grid)</div>
-          <span id="batchPanelCaret" style="color:rgba(242,240,230,0.5);">▾</span>
-        </div>
-        <div id="batchPanelBody" style="display:none;">
-          <div class="ds" style="margin-bottom:8px;">Select the parent folder holding all your pack subfolders (each with its own manifest.json + 10 images) — works for 5 or 500. Every pack is auto-prepared in the background: matching MP3 → 1.12x speed → sync → locked caption style → default background music. No live editor cards, no tabs — just a grid you click into.</div>
-          <div id="batchDropZone" style="border:1.5px dashed var(--line);border-radius:6px;padding:14px 10px;text-align:center;margin-bottom:8px;cursor:pointer;">
-            <div class="dt" style="color:var(--green-bright);font-size:11px;">⇪ Drag the parent folder here</div>
-            <div class="ds" style="font-size:9px;margin-top:4px;">most reliable — reads nested pack subfolders directly, works even with the page opened as a local file</div>
-          </div>
-          <button type="button" id="batchFolderBtn" class="align-btn" style="width:100%;margin-bottom:8px;">Or browse for the folder</button>
-          <input type="file" id="batchFolderInput" webkitdirectory directory multiple style="display:none">
-          <div id="batchIngestStatus" style="font-size:9.5px;margin-bottom:8px;min-height:12px;"></div>
-
-          <div id="batchResumeBox" style="display:none;background:rgba(224,168,74,0.08);border:1px solid #e0a84a;border-radius:4px;padding:8px;margin-bottom:8px;font-size:9.5px;">
-            <div id="batchResumeText" style="margin-bottom:6px;color:#e0a84a;"></div>
-            <button type="button" id="batchResumeBtn" class="align-btn" style="width:100%;margin-bottom:4px;">Resume unfinished batch</button>
-            <button type="button" id="batchClearBtn" class="align-btn" style="width:100%;">Clear old batch</button>
-          </div>
-
-          <div id="batchListWrap" style="display:none;">
-            <div style="font-size:9.5px;color:rgba(242,240,230,0.55);margin-bottom:8px;" id="batchListSummary"></div>
-            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:9.5px;">
-              <span>Voice-over speed</span>
-              <input type="number" id="batchSpeedInput" value="1.12" step="0.01" min="0.5" max="2" style="width:60px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
-            </div>
-            <button type="button" id="batchGenerateBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">▶ Start auto-prepare</button>
-            <div id="batchPrepStatus" style="font-size:9.5px;margin-bottom:8px;min-height:12px;color:var(--green-bright);"></div>
-            <button type="button" id="batchOpenGridBtn" style="width:100%;background:#1c2118;color:var(--green-bright);border:1px solid var(--green-bright);border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;">⊞ Open pack grid</button>
-          </div>
-        </div>
-      </div>
 
       <label for="fileInput" class="drop" id="dropZone">
         <input type="file" id="fileInput" accept="image/*" multiple>
@@ -1207,6 +1140,76 @@
     <div id="musicList" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div id="musicEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No background music uploaded yet.</div>
   </div>
+</div>
+
+<div class="modal-overlay" id="batchModalOverlay">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-head">
+      <h2>Batch automation</h2>
+      <button type="button" class="modal-close" id="batchModalClose">✕</button>
+    </div>
+    <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
+      Upload a parent folder that contains one subfolder per pack (10 images + manifest.json each). Then pick a range and hit Start — each pack in range gets loaded, matched to an MP3, sped up, and synced automatically, using the exact same systems as the manual editor. Nothing renders/downloads yet — finished packs land in the Review queue for you to check before export. Safe to close the tab; reopening resumes unfinished packs instead of starting over.
+    </div>
+    <label for="batchFolderInput" class="drop" id="batchDropZone" style="padding:16px;margin-bottom:8px;">
+      <input type="file" id="batchFolderInput" webkitdirectory directory multiple>
+      <div class="dt">Select the parent folder of packs</div>
+      <div class="ds">each subfolder = one pack (images + manifest.json)</div>
+    </label>
+    <div id="batchUploadStatus" style="font-size:9.5px;color:var(--green-bright);margin-bottom:10px;min-height:12px;"></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;border-top:1px solid var(--line);padding-top:10px;">
+      <div style="flex:1;min-width:90px;">
+        <label style="display:block;font-size:9.5px;margin-bottom:4px;">From pack #</label>
+        <input type="number" id="batchRangeStart" min="1" value="1" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
+      </div>
+      <div style="flex:1;min-width:90px;">
+        <label style="display:block;font-size:9.5px;margin-bottom:4px;">To pack #</label>
+        <input type="number" id="batchRangeEnd" min="1" value="1" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
+      </div>
+      <div style="flex:1;min-width:90px;">
+        <label style="display:block;font-size:9.5px;margin-bottom:4px;">Max V.O. speed</label>
+        <input type="number" id="batchMaxSpeed" min="0.5" max="2" step="0.01" value="1.12" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
+      </div>
+      <div style="flex:1;min-width:90px;">
+        <label style="display:block;font-size:9.5px;margin-bottom:4px;">Concurrent tabs</label>
+        <input type="number" id="batchConcurrency" min="1" max="6" step="1" value="3" style="width:100%;background:#0d0f0c;border:1px solid var(--line);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px;border-radius:3px;">
+      </div>
+    </div>
+    <div style="font-size:9.5px;color:rgba(242,240,230,0.45);margin-bottom:10px;">Needs a saved Groq API key (Voice-over library panel) for the sync step.</div>
+
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button type="button" id="batchStartBtn" class="align-btn" style="flex:1;background:var(--green-bright);color:#06120b;">▶ Start workflow</button>
+      <button type="button" id="batchPauseBtn" class="align-btn" style="display:none;">⏸ Pause</button>
+      <button type="button" id="batchResumeBtn" class="align-btn" style="display:none;">▶ Resume</button>
+    </div>
+    <div id="batchProgressBar" style="height:6px;border-radius:3px;background:rgba(242,240,230,0.1);overflow:hidden;margin-bottom:6px;display:none;">
+      <div id="batchProgressFill" style="height:100%;width:0%;background:var(--green-bright);transition:width .2s;"></div>
+    </div>
+    <div id="batchStatus" style="font-size:9.5px;color:rgba(242,240,230,0.7);margin-bottom:10px;min-height:12px;"></div>
+    <div id="batchList" style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;"></div>
+    <div id="batchEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">No packs uploaded yet.</div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="reviewQueueModalOverlay">
+  <div class="modal-box" style="max-width:520px;">
+    <div class="modal-head">
+      <h2>Review queue</h2>
+      <button type="button" class="modal-close" id="reviewQueueModalClose">✕</button>
+    </div>
+    <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:10px;">
+      Packs that finished matching + speed + sync automatically, waiting on you. Click one to load it into the editor, make any corrections, then hit "Reviewed — Good to go" down there to render, download, and move to the next.
+    </div>
+    <div id="reviewQueueList" style="display:flex;flex-direction:column;gap:4px;"></div>
+    <div id="reviewQueueEmpty" style="font-size:9.5px;color:rgba(242,240,230,0.4);">Nothing waiting for review yet.</div>
+  </div>
+</div>
+
+<div id="reviewBar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:500;background:#101210;border-top:1px solid var(--green-bright);padding:10px clamp(16px,4vw,40px);align-items:center;gap:10px;font-family:var(--mono);">
+  <span id="reviewBarLabel" style="font-size:11px;color:var(--green-bright);font-weight:800;flex:1;">Reviewing Pack —</span>
+  <button type="button" id="reviewSkipBtn" class="qb-btn">Skip for now</button>
+  <button type="button" id="reviewGoodBtn" class="qb-btn qb-btn-alt">✓ Reviewed — Good to go</button>
 </div>
 
 <div class="modal-overlay" id="playerOverlay" style="align-items:center;">
@@ -1986,12 +1989,8 @@
     voiceSpeedVal.textContent = (+voiceSpeedRange.value).toFixed(2) + 'x';
   });
 
-  async function performApplyVoiceSpeed(explicitSpeed){
-    if(explicitSpeed != null){
-      voiceSpeedRange.value = explicitSpeed;
-      voiceSpeedVal.textContent = (+explicitSpeed).toFixed(2) + 'x';
-    }
-    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return { ok:false, message:'Add an MP3 first.' }; }
+  async function runVoiceSpeedApply(){
+    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return false; }
     const speed = +voiceSpeedRange.value || 1;
     voiceSpeedApplyBtn.disabled = true;
     voiceSpeedStatus.style.color = '';
@@ -2018,17 +2017,17 @@
       voiceSpeedStatus.style.color = '#8fd19e';
       voiceSpeedStatus.textContent = `Done — voice-over is now ${speed.toFixed(2)}x speed, pitch unchanged.`;
       await saveTemplateToStorage();
-      return { ok:true, speed };
+      return true;
     } catch(err){
       console.error(err);
       voiceSpeedStatus.style.color = '#e0866a';
       voiceSpeedStatus.textContent = err.message || 'Speed change failed.';
-      return { ok:false, message: err.message || 'Speed change failed.' };
+      throw err;
     } finally {
       voiceSpeedApplyBtn.disabled = false;
     }
   }
-  voiceSpeedApplyBtn.addEventListener('click', ()=>performApplyVoiceSpeed());
+  voiceSpeedApplyBtn.addEventListener('click', ()=> runVoiceSpeedApply().catch(()=>{}));
 
   voiceSpeedResetBtn.addEventListener('click', async ()=>{
     if(!originalAudioFile) return;
@@ -2122,12 +2121,12 @@
     return matchedIdxs;
   }
 
-  async function performVoiceSync(){
+  async function runSyncVoice(){
     const apiKey = groqKeyInput.value.trim();
-    if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return { ok:false, message:'Add your Groq API key first.' }; }
-    if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return { ok:false, message:'Add an MP3 first.' }; }
+    if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return false; }
+    if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return false; }
     const capTokensList = captions.map(c => (c||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean));
-    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return { ok:false, message:'Fill in the captions first.' }; }
+    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return false; }
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
@@ -2163,52 +2162,17 @@
         }
       }
 
-      // pass 1.5 — single-word fallback for captions that FAILED the main match (paraphrased
-      // scripts, mis-heard brand/product names, etc). Rather than letting these fall all the way
-      // back to a pure word-count guess (the actual source of "image before/after voice" drift),
-      // search the whole remaining transcript for this caption's single most distinctive word
-      // (longest token — usually the product name) using an EXACT match only, no fuzzy tolerance,
-      // to avoid anchoring on a false positive. One correct anchor point beats a whole-caption
-      // guess. Captions still unmatched here fall through to the group-proportional estimate as
-      // before, unchanged.
-      let fallbackPointer = 0;
-      for(let i=0;i<N;i++){
-        if(matches[i]){
-          // an already-matched caption (from pass 1) moves the search cursor forward so
-          // later fallback lookups never search backward into speech that's already used
-          const endWord = words.findIndex(w => w.start === matches[i].end);
-          fallbackPointer = Math.max(fallbackPointer, endWord >= 0 ? endWord + 1 : fallbackPointer);
-          continue;
-        }
-        const toks = capTokensList[i];
-        if(!toks.length) continue;
-        const distinctive = toks.slice().sort((a,b)=>b.length-a.length)[0];
-        if(!distinctive || distinctive.length < 3) continue; // too short/generic to trust as an anchor
-        let found = -1;
-        for(let k=fallbackPointer; k<words.length; k++){
-          if(syncNormWord(words[k].word) === distinctive){ found = k; break; }
-        }
-        if(found !== -1){
-          matches[i] = { start: words[found].start, end: words[found].end, hitCount: 1, tokCount: toks.length, singleWord: true };
-          fallbackPointer = found + 1;
-        }
-      }
-
       // Reject "false positive" anchors: a real spoken caption needs a sane minimum amount of
       // audio per word (real speech, even fast, rarely drops below ~0.12s/word). If a matched
       // anchor implies less time than that for its own words, it's almost certainly a stray fuzzy
       // match landing on the wrong word — treating it as a hard boundary was what compressed every
       // caption after it down to the 0.20s floor. Demote it back to "unmatched" so pass 2 estimates
-      // it from surrounding timing instead of trusting a bad timestamp. Single-word fallback
-      // anchors (pass 1.5) are exempt from the token-count scaling — they only ever represent
-      // one spoken word's own duration, not the whole caption's, so the multi-word floor doesn't
-      // apply to them; a plain non-trivial word length is enough sanity check.
+      // it from surrounding timing instead of trusting a bad timestamp.
       const MIN_SEC_PER_WORD = 0.12;
       for(let i=0;i<N;i++){
         const m = matches[i];
         if(!m) continue;
-        const floor = m.singleWord ? MIN_SEC_PER_WORD : MIN_SEC_PER_WORD * Math.max(1, m.tokCount) * 0.5;
-        if((m.end - m.start) < floor){
+        if((m.end - m.start) < MIN_SEC_PER_WORD * Math.max(1, m.tokCount) * 0.5){
           matches[i] = null;
         }
       }
@@ -2260,7 +2224,7 @@
           const dur = Math.max(0.2, +(span * weights[k]/wSum).toFixed(2));
           newDur[i] = dur;
           const label = (captions[i]||'').trim();
-          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real, singleWord: i===A.idx && A.real && matches[i] && matches[i].singleWord });
+          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real });
         });
       }
 
@@ -2284,19 +2248,19 @@
       syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
       syncBreakdown.style.display = 'block';
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
-        `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched ? (r.singleWord ? '#8fc7d1' : 'var(--green-bright)') : '#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched ? (r.singleWord ? ' <span style="opacity:.6;">(anchored on 1 word)</span>' : '') : ' <span style="opacity:.6;">(estimated)</span>'}</div>`
+        `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched?'var(--green-bright)':'#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched?'':' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
-      syncVoiceBtn.disabled = false;
-      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length };
+      return true;
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
       syncStatus.textContent = err.message || 'Sync failed.';
+      throw err;
+    } finally {
       syncVoiceBtn.disabled = false;
-      return { ok:false, message: err.message || 'Sync failed.' };
     }
   }
-  syncVoiceBtn.addEventListener('click', performVoiceSync);
+  syncVoiceBtn.addEventListener('click', ()=> runSyncVoice().catch(()=>{}));
 
   alignRow.querySelectorAll('.align-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -2612,8 +2576,7 @@
     return { hookItem, cardItem, rest };
   }
 
-  function applyManifest(items, imageFiles, root){
-    return new Promise((resolveApply)=>{
+  function applyManifest(items, imageFiles, root, onDone){
     // A manifest upload replaces the whole batch, not just the slots it
     // touches — otherwise old images/captions from a previous session
     // linger in the untouched slots.
@@ -2662,8 +2625,6 @@
     let slot = images.findIndex(x=>!x);
     let loaded = 0, missing = 0, pending = items.length;
 
-    if(pending === 0){ finish(); return; }
-
     items.forEach(item=>{
       if(slot === -1 || slot >= N){ pending--; if(pending===0) finish(); return; }
       const f = resolveFile(item.file);
@@ -2691,9 +2652,9 @@
       const extras = [hookItem?'hook':null, cardItem?'card':null].filter(Boolean).join(' + ');
       setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (extras?' (auto-filled '+extras+')':'') + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
       computeAutoCardColor();
-      resolveApply({loaded, missing});
+      if(typeof onDone === 'function') onDone({ loaded, missing });
     }
-    });
+    if(items.length === 0) finish();
   }
   ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
   ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
@@ -2714,7 +2675,7 @@
     findMatchStatus.textContent = msg;
   }
 
-  async function performFindMatchMp3(){
+  async function runFindMatch(){
     findMatchBtn.disabled = true;
     findMatchResult.style.display = 'none';
     setFindMatchStatus('Starting…', true);
@@ -2724,7 +2685,7 @@
     if(!capsForMatch.some(c=>c && c.trim())){
       setFindMatchStatus('Add captions first — nothing to match against yet.', false);
       findMatchBtn.disabled = false;
-      return { status:'error', message:'No captions to match against yet.' };
+      return;
     }
 
     setFindMatchStatus('Finding the closest voice-over…', true);
@@ -2734,7 +2695,7 @@
     if(!voiceovers.length){
       setFindMatchStatus('No transcribed MP3s yet — add & transcribe some in the Voice-over library first.', false);
       findMatchBtn.disabled = false;
-      return { status:'none', message:'No transcribed MP3s in the library yet.' };
+      return;
     }
 
     let best = null;
@@ -2743,31 +2704,27 @@
       if(!best || confidence > best.confidence) best = { vo, confidence };
     }
 
-    let result;
     if(best && best.confidence >= FIND_MATCH_AUTO_THRESHOLD){
       await assignVoiceoverToVideo(best.vo.id, CURRENT_EDITOR_KEY);
       setFindMatchStatus(`Found it — "${best.vo.name}" (${Math.round(best.confidence*100)}% match) — applied.`, true);
       findMatchResult.style.display = 'block';
       findMatchResult.innerHTML = `Wrong MP3? Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> and pick a different one from the dropdown — takes one click.`;
-      result = { status:'applied', confidence: best.confidence, name: best.vo.name };
     } else if(best && best.confidence > 0){
       setFindMatchStatus(`Best guess: "${best.vo.name}" (${Math.round(best.confidence*100)}%) — below 80%, not auto-applied.`, false);
       findMatchResult.style.display = 'block';
       findMatchResult.innerHTML = `Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> to review it or assign a different MP3 manually.`;
-      result = { status:'guess', confidence: best.confidence, name: best.vo.name };
     } else {
       setFindMatchStatus('No matching voice-over found among the transcribed MP3s.', false);
       findMatchResult.style.display = 'block';
       findMatchResult.innerHTML = `Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> to assign one manually.`;
-      result = { status:'none' };
     }
     const link = document.getElementById('findMatchReplaceLink');
     if(link) link.addEventListener('click', e=>{ e.preventDefault(); openVoiceLibBtn.click(); });
 
     findMatchBtn.disabled = false;
-    return result;
+    return true;
   }
-  findMatchBtn.addEventListener('click', performFindMatchMp3);
+  findMatchBtn.addEventListener('click', runFindMatch);
 
   function renderTray(){
     tray.innerHTML = '';
@@ -2909,7 +2866,7 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 6;
+  const IDB_VERSION = 5;
   // ---------- schema note ----------
   // v3 stored the blob (mp4/mp3) INSIDE the same record as its metadata (name, date,
   // transcript, template…). Every list screen — gallery, voice-over library, music
@@ -2948,19 +2905,10 @@
         if(!db.objectStoreNames.contains('voiceoverBlobs')) db.createObjectStore('voiceoverBlobs', { keyPath:'id' });
         if(!db.objectStoreNames.contains('musicBlobs')) db.createObjectStore('musicBlobs', { keyPath:'id' });
         if(!db.objectStoreNames.contains('videoTemplates')) db.createObjectStore('videoTemplates', { keyPath:'id' });
-        // v5: bulk pack-batch processing (multiple packs uploaded together, worked
-        // through by 3 concurrent internal editor tabs). Each record is one pack:
-        // its manifest root/items plus the actual image Files, so a batch survives
-        // a launcher-tab reload without re-uploading anything.
-        if(!db.objectStoreNames.contains('batchPacks')) db.createObjectStore('batchPacks', { keyPath:'id', autoIncrement:true });
-        // v6: 100-pack batch rework — each pack's fully-prepped project (mp3
-        // match, speed, sync, locked captions, default music) is captured as a
-        // template the instant background prep finishes, so opening a pack for
-        // review is instant and never re-runs the pipeline. Finished renders are
-        // cached as real Blobs so "Download All Packs" can zip them without
-        // re-rendering anything.
-        if(!db.objectStoreNames.contains('batchPackTemplates')) db.createObjectStore('batchPackTemplates', { keyPath:'id' });
-        if(!db.objectStoreNames.contains('batchRenders')) db.createObjectStore('batchRenders', { keyPath:'id' });
+        // ---- batch automation stores ----
+        if(!db.objectStoreNames.contains('packs')) db.createObjectStore('packs', { keyPath:'id' }); // {id, order, name, manifest, images:[File], status, error, createdAt}
+        if(!db.objectStoreNames.contains('packTemplates')) db.createObjectStore('packTemplates', { keyPath:'id' }); // id === pack id; value === collectTemplate() output
+        if(!db.objectStoreNames.contains('automationMeta')) db.createObjectStore('automationMeta', { keyPath:'key' }); // singleton run state, key='run'
         if(ev.oldVersion > 0 && ev.oldVersion < 4){
           // migrate: pull the inline blob out of each existing record, into its new
           // sibling store, leaving lightweight metadata behind in the original store.
@@ -3285,52 +3233,6 @@
     await renderBgMusicOptions();
 
     refreshAll();
-  }
-
-  // ---------- locked caption rules (used by the 100-pack batch autopilot) ----------
-  // Fixed, non-negotiable style so every batch video looks identical: no per-video
-  // drift, no per-image position overrides, no per-word card positions. Hookflash
-  // and showcase reveal one word at a time; the card already does.
-  const LOCKED_CAPTION_RULES = {
-    hook:     { fontSize:50, pos:{ xNorm:0.5, yNorm:0.5,  align:'center' } },
-    showcase: { fontSize:34, pos:{ xNorm:0.5, yNorm:0.84, align:'center' } },
-    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 } }
-  };
-  function applyLockedCaptionRules(){
-    hookCapFontSize = LOCKED_CAPTION_RULES.hook.fontSize;
-    hookCaptionPos = { ...LOCKED_CAPTION_RULES.hook.pos };
-    hookWordByWord = true;
-
-    capFontSize = LOCKED_CAPTION_RULES.showcase.fontSize;
-    captionPos = { ...LOCKED_CAPTION_RULES.showcase.pos };
-    capPosOverride = new Array(N).fill(null); // never let any single image drift from the locked position
-    showWordByWord = true;
-
-    cardFontSize = LOCKED_CAPTION_RULES.card.fontSize;
-    cardTextPos = { ...LOCKED_CAPTION_RULES.card.pos };
-    cardWordPosEnabled = {}; cardWordPos = {}; // never let per-word card positions shift left/right
-
-    try{
-      document.getElementById('hookCapSizeVal').value = hookCapFontSize;
-      capSizeVal.value = capFontSize;
-      cardSizeVal.value = cardFontSize;
-      hookWordToggle.checked = true;
-      showWordToggle.checked = true;
-    } catch(e){ /* fine if the editor UI isn't mounted yet */ }
-  }
-
-  // Applies whichever music-library track is flagged "Use by default" — no
-  // searching/matching, just the one flag the person checked once.
-  async function applyDefaultBackgroundMusic(){
-    const all = await idbGetAll('music');
-    const def = all.find(m=>m.useByDefault);
-    if(!def) return false;
-    bgMusicId = def.id;
-    bgMusicFile = await idbGetBlob('music', def.id);
-    bgMusicTrimStart = 0; bgMusicTrimEnd = null;
-    await loadBgMusicDuration();
-    try{ await renderBgMusicOptions(); }catch(e){}
-    return true;
   }
 
   async function saveTemplateToStorage(){
@@ -3866,8 +3768,12 @@
   }
 
   async function addVoiceoverFiles(fileList){
-    const files = Array.from(fileList).filter(f => f.type.startsWith('audio/') || /\.mp3$/i.test(f.name));
-    if(!files.length) return;
+    const all = Array.from(fileList);
+    const files = all.filter(f => f.type.startsWith('audio/') || /\.mp3$/i.test(f.name));
+    if(!files.length){
+      if(all.length) setVoStatus(`None of the ${all.length} file(s) looked like audio (need .mp3 or an audio/* type) — nothing added.`, true);
+      return;
+    }
     for(const f of files){
       // saved immediately — mp3s must never depend on staying in memory
       const id = await idbPut('voiceovers', { name: f.name, transcript: null, status: 'pending', matchedVideoId: null, confidence: 0, createdAt: Date.now() });
@@ -4485,24 +4391,10 @@
       row.innerHTML = `
         <button type="button" class="align-btn" data-mplay="${m.id}" style="padding:6px 9px;flex:0 0 auto;">▶</button>
         <div style="font-family:var(--mono);font-size:11px;color:var(--paper);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.name}</div>
-        <label style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9px;color:${m.useByDefault?'var(--green-bright)':'rgba(242,240,230,0.55)'};white-space:nowrap;cursor:pointer;">
-          <input type="checkbox" data-mdefault="${m.id}" ${m.useByDefault?'checked':''}> USE BY DEFAULT
-        </label>
         <button type="button" class="align-btn" data-mdel="${m.id}" style="padding:6px 9px;">Delete</button>
       `;
       musicList.appendChild(row);
     }
-    musicList.querySelectorAll('[data-mdefault]').forEach(cb=>{
-      cb.addEventListener('change', async ()=>{
-        const id = +cb.dataset.mdefault;
-        const all = await idbGetAll('music');
-        for(const m of all){
-          const shouldBeDefault = cb.checked && m.id === id;
-          if(!!m.useByDefault !== shouldBeDefault){ m.useByDefault = shouldBeDefault; await idbPut('music', m); }
-        }
-        await renderMusicList();
-      });
-    });
     musicList.querySelectorAll('[data-mplay]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = +btn.dataset.mplay;
@@ -5243,11 +5135,8 @@
   }
 
   // ---------- export ----------
-  let currentPackFilename = null; // set by batch autopilot before export, so downloads are named per-pack instead of always "hook-showcase.mp4"
-  async function performExportAndDownload(opts){
-    opts = opts || {};
-    const autoDownload = !!opts.autoDownload;
-    if(loadedCount()<N) return { ok:false, message:'Not all image/caption slots are filled yet.' };
+  genBtn.addEventListener('click', async ()=>{
+    if(loadedCount()<N) return;
     stopPreview();
     // If a music-track switch is still resolving (id lookup + duration probe),
     // wait for it — otherwise export can grab the previous track's blob.
@@ -5273,7 +5162,7 @@
     const fps = 30;
     const setPct = pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; };
 
-    let finalBlob = null, filename = currentPackFilename || 'hook-showcase.mp4';
+    let finalBlob = null, filename = 'hook-showcase.mp4';
     try{
       if(webCodecsSupported()){
         finalBlob = await encodeWithWebCodecs(dur, fps, setPct);
@@ -5290,7 +5179,8 @@
       genBtn.disabled = false;
       genBtn.textContent = 'Generate video';
       drawPreviewFrame(0);
-      return { ok:false, message: (err && err.message) || 'Export failed.' };
+      document.dispatchEvent(new CustomEvent('hs:exportDone', { detail:{ ok:false, error: (err&&err.message)||'export failed' } }));
+      return;
     }
 
     // LEAK FIX: every previous export's blob URL (and the full mp4 ArrayBuffer/Blob it
@@ -5315,16 +5205,8 @@
       console.error('saving to gallery failed', err);
       showTmplStatus('Video downloaded but could not save to gallery.', true);
     }
-
-    if(autoDownload){
-      // Programmatically trigger the same download the user would get by
-      // clicking "Download .mp4" — safe here because it's still inside the
-      // call chain kicked off by the user's own "Reviewed — Good to Go" click.
-      dlLink.click();
-    }
-    return { ok:true, filename, blob: finalBlob };
-  }
-  genBtn.addEventListener('click', ()=>performExportAndDownload());
+    document.dispatchEvent(new CustomEvent('hs:exportDone', { detail:{ ok:true, blob: finalBlob } }));
+  });
 
   // ================= VOICE CONTROL LAYER =================
   // Architecture: voice -> LLM -> structured action(s) -> editor validates & executes
@@ -5996,640 +5878,546 @@ Reply with ONLY JSON. No prose, no markdown.`;
   // ================= END VOICE CONTROL LAYER =================
 
 
-  // ================= BULK PACK BATCH PROCESSING (v2) =================
-  // Three roles for this same file, switched by URL params:
-  //  - normal (no ?embedded): the bulk uploader + orchestrator. Ingests every
-  //    pack folder at once into IndexedDB (batchPacks), then drives ONE hidden
-  //    iframe through the fixed pipeline (find MP3 → 1.12x speed → sync →
-  //    locked captions → default music) sequentially, one pack at a time —
-  //    never several at once, so it behaves the same in every browser instead
-  //    of drowning it in concurrent canvas/MediaRecorder tabs. The prepared
-  //    project for each pack is captured as a full template the instant prep
-  //    finishes. The UI is a compact numbered grid, not live editor cards.
-  //  - embedded mode=prep (hidden, headless): loads exactly one pack fresh
-  //    (own iframe reload per pack, so nothing ever leaks between packs),
-  //    runs the pipeline, saves the resulting template, reports back, done —
-  //    no rendering, no waiting for a human.
-  //  - embedded mode=review (visible, one at a time): loads a single pack's
-  //    already-prepared project into the real editor — the exact same "Full
-  //    Gallery" editing experience — so the person can tweak anything, then
-  //    click "Reviewed — Good to Go" to render, download, and cache the
-  //    render for the ZIP.
+  // ================= BATCH AUTOMATION + REVIEW QUEUE LAYER =================
+  // Everything below is additive — it drives the exact same functions/buttons the
+  // manual flow uses (applyManifest, runFindMatch, runVoiceSpeedApply, runSyncVoice,
+  // collectTemplate/applyTemplate, genBtn) and never touches the manual workflow itself.
   (function(){
-    const urlParams = new URLSearchParams(location.search);
-    const embeddedMode = urlParams.get('embedded') === '1' ? (urlParams.get('mode') || 'review') : null;
-    const embeddedPackId = urlParams.get('packId') ? +urlParams.get('packId') : null;
+    const params = new URLSearchParams(location.search);
+    const HEADLESS = params.get('headless') === '1';
+    const HEADLESS_PACK_ID = params.get('packId');
 
-    function groupFilesIntoPacks(fileList){
-      const files = Array.from(fileList);
-      // Group by each file's DIRECT containing folder (not just the first path
-      // segment) — this works no matter how deep the pack folders sit under
-      // whatever folder was selected (the packs' own parent, or a folder above
-      // that, or a single pack folder directly).
-      const byDir = new Map();
+    // ---- raw, uncached IDB helpers (packs/packTemplates get written from other
+    // iframes/tabs sharing the same origin's IndexedDB — idbGetAll's in-memory
+    // cache above is per-page-context and would go stale across those, so batch
+    // code always reads these two stores fresh, straight off a new transaction) ----
+    async function rawGetAll(store){
+      const db = await openDB();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readonly');
+        const req = tx.objectStore(store).getAll();
+        req.onsuccess = ()=>res(req.result||[]);
+        req.onerror = ()=>rej(req.error);
+      });
+    }
+    async function rawGet(store, key){
+      const db = await openDB();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readonly');
+        const req = tx.objectStore(store).get(key);
+        req.onsuccess = ()=>res(req.result||null);
+        req.onerror = ()=>rej(req.error);
+      });
+    }
+    async function rawPut(store, value){
+      const db = await openDB();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readwrite');
+        const req = tx.objectStore(store).put(value);
+        req.onsuccess = ()=>res(req.result);
+        req.onerror = ()=>rej(req.error);
+      });
+    }
+    async function rawDelete(store, key){
+      const db = await openDB();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readwrite');
+        const req = tx.objectStore(store).delete(key);
+        req.onsuccess = ()=>res();
+        req.onerror = ()=>rej(req.error);
+      });
+    }
+
+    async function getPack(id){ return rawGet('packs', id); }
+    async function putPack(p){ p.updatedAt = Date.now(); return rawPut('packs', p); }
+    async function getAllPacks(){ return (await rawGetAll('packs')).sort((a,b)=> a.order - b.order); }
+    async function getMeta(){ return (await rawGet('automationMeta', 'run')) || { key:'run', running:false, rangeStart:1, rangeEnd:1, maxSpeed:1.12, concurrency:3, activePackIds:[] }; }
+    async function putMeta(m){ m.key='run'; return rawPut('automationMeta', m); }
+
+    // =========================================================
+    // HEADLESS WORKER MODE — this exact document, loaded in a hidden iframe with
+    // ?headless=1&packId=N, drives one pack through steps 1-4 using its own private
+    // JS globals (images/captions/audioFile/etc live in THIS iframe's scope only —
+    // that's what guarantees packs can never bleed into each other, even when many
+    // run at once).
+    // =========================================================
+    if(HEADLESS){
+      (async function runHeadlessPack(){
+        const packId = HEADLESS_PACK_ID;
+        const opener = window.opener || window.parent;
+        const reportDone = (status, error)=>{
+          try{ opener.postMessage({ type:'hs-pack-done', packId, status, error: error||null }, '*'); }catch(e){}
+        };
+        // visible tab: show plain-text progress instead of the blank editor UI,
+        // so a paused/errored tab is actually readable when the user clicks over to it
+        const statusEl = document.createElement('div');
+        statusEl.style.cssText = 'font-family:monospace;background:#050806;color:#f2f0e6;min-height:100vh;padding:24px;font-size:14px;line-height:1.6;white-space:pre-wrap;';
+        document.body.innerHTML = '';
+        document.body.appendChild(statusEl);
+        const setStatus = (msg)=>{ statusEl.textContent = 'Pack ' + packId + '\n\n' + msg; document.title = 'Pack ' + packId + ' — working…'; };
+        setStatus('Starting…');
+        try{
+          await openDB(); // make sure schema/upgrade has run in this context too
+          const pack = await getPack(packId);
+          if(!pack) throw new Error('Pack not found (' + packId + ')');
+          pack.status = 'processing';
+          await putPack(pack);
+
+          const manifestItems = Array.isArray(pack.manifest && pack.manifest.items) ? pack.manifest.items : [];
+          const imageFiles = pack.images || [];
+          if(!manifestItems.length) throw new Error('manifest.json has no items');
+          if(!imageFiles.length) throw new Error('No images stored for this pack');
+
+          setStatus('Loading images + manifest…');
+          await new Promise((resolve, reject)=>{
+            try{ applyManifest(manifestItems, imageFiles, pack.manifest, ({missing})=>{
+              if(missing > 0) setStatus(`Loaded images. Warning: ${missing} image(s) did not match any manifest keyword.`);
+              resolve();
+            }); } catch(err){ reject(err); }
+          });
+          await sleep(150); // let image onload thumbnails settle before reading state
+
+          setStatus('Finding matching MP3…');
+          await runFindMatch();
+          if(!audioFile) throw new Error('No matching MP3 found/assigned for this pack — add & transcribe more MP3s in the Voice-over library, or raise the pack in the Review queue and assign one manually.');
+
+          setStatus(`Matched MP3: ${audioFile.name || 'audio'}\nSpeeding up voice-over…`);
+          const targetSpeed = Math.max(0.5, Math.min(2, pack.maxSpeed || 1.12));
+          voiceSpeedRange.value = targetSpeed;
+          voiceSpeedRange.dispatchEvent(new Event('input'));
+          await runVoiceSpeedApply();
+
+          if(!groqKeyInput.value.trim()) throw new Error('No Groq API key saved — add one in the Voice-over library panel first');
+          setStatus('Syncing captions to voice-over timing…');
+          await runSyncVoice();
+
+          const tpl = await collectTemplate();
+          await rawPut('packTemplates', { id: packId, template: tpl });
+
+          pack.status = 'awaiting_review';
+          pack.error = null;
+          pack.processedAt = Date.now();
+          await putPack(pack);
+          setStatus('Done — sent to Review queue. This tab closes in 2s.');
+          document.title = 'Pack ' + packId + ' — done';
+          reportDone('awaiting_review');
+          setTimeout(()=>{ try{ window.close(); }catch(e){} }, 2000);
+        } catch(err){
+          const msg = (err && err.message) || String(err);
+          console.error('Headless pack failed', packId, err);
+          try{
+            const pack = await getPack(packId);
+            if(pack){ pack.status = 'error'; pack.error = msg; await putPack(pack); }
+          } catch(e2){}
+          setStatus('FAILED:\n' + msg + '\n\nThis tab stays open so you can see what went wrong.\nFix the issue (e.g. missing MP3, wrong Groq key) and hit Start workflow again — this pack will be retried.');
+          document.title = 'Pack ' + packId + ' — FAILED';
+          reportDone('error', msg);
+        }
+      })();
+      return; // headless iframes render nothing else — the UI below is for the main tab
+    }
+
+    // =========================================================
+    // MAIN-TAB ORCHESTRATOR + UI (bulk upload, queue, review)
+    // =========================================================
+    const batchModalOverlay = document.getElementById('batchModalOverlay');
+    const batchModalClose = document.getElementById('batchModalClose');
+    const openBatchBtn = document.getElementById('openBatchBtn');
+    const batchFolderInput = document.getElementById('batchFolderInput');
+    const batchUploadStatus = document.getElementById('batchUploadStatus');
+    const batchRangeStart = document.getElementById('batchRangeStart');
+    const batchRangeEnd = document.getElementById('batchRangeEnd');
+    const batchMaxSpeed = document.getElementById('batchMaxSpeed');
+    const batchConcurrency = document.getElementById('batchConcurrency');
+    const batchStartBtn = document.getElementById('batchStartBtn');
+    const batchPauseBtn = document.getElementById('batchPauseBtn');
+    const batchResumeBtn = document.getElementById('batchResumeBtn');
+    const batchProgressBar = document.getElementById('batchProgressBar');
+    const batchProgressFill = document.getElementById('batchProgressFill');
+    const batchStatus = document.getElementById('batchStatus');
+    const batchList = document.getElementById('batchList');
+    const batchEmpty = document.getElementById('batchEmpty');
+    const qbPackCount = document.getElementById('qbPackCount');
+
+    const reviewQueueModalOverlay = document.getElementById('reviewQueueModalOverlay');
+    const reviewQueueModalClose = document.getElementById('reviewQueueModalClose');
+    const openReviewQueueBtn = document.getElementById('openReviewQueueBtn');
+    const reviewQueueList = document.getElementById('reviewQueueList');
+    const reviewQueueEmpty = document.getElementById('reviewQueueEmpty');
+    const qbReviewCount = document.getElementById('qbReviewCount');
+
+    const reviewBar = document.getElementById('reviewBar');
+    const reviewBarLabel = document.getElementById('reviewBarLabel');
+    const reviewGoodBtn = document.getElementById('reviewGoodBtn');
+    const reviewSkipBtn = document.getElementById('reviewSkipBtn');
+
+    // On file:// (opening the .html directly, no server), Chrome scopes IndexedDB
+    // per exact file path — "app (2).html" and "app.html" are DIFFERENT storage
+    // origins, so a renamed/duplicated copy always starts empty. Warn once so it's
+    // not mistaken for data loss.
+    if(location.protocol === 'file:' && /\(\d+\)\.html$/i.test(location.pathname)){
+      getAllPacks().then(packs=>{
+        if(!packs.length){
+          batchUploadStatus.style.color = '#e0a94a';
+          batchUploadStatus.textContent = 'Heads up: this file looks like a renamed/duplicated copy ("(N).html"). On file:// each exact filename is its own separate storage — that\'s why saved packs/templates/MP3s from the original file don\'t show up here. Open the original file to see your saved data.';
+        }
+      }).catch(()=>{});
+    }
+
+    openBatchBtn.addEventListener('click', ()=>{ batchModalOverlay.classList.add('on'); renderBatchList(); });
+    batchModalClose.addEventListener('click', ()=> batchModalOverlay.classList.remove('on'));
+    batchModalOverlay.addEventListener('click', e=>{ if(e.target===batchModalOverlay) batchModalOverlay.classList.remove('on'); });
+    openReviewQueueBtn.addEventListener('click', ()=>{ reviewQueueModalOverlay.classList.add('on'); renderReviewQueueList(); });
+    reviewQueueModalClose.addEventListener('click', ()=> reviewQueueModalOverlay.classList.remove('on'));
+    reviewQueueModalOverlay.addEventListener('click', e=>{ if(e.target===reviewQueueModalOverlay) reviewQueueModalOverlay.classList.remove('on'); });
+
+    // ---------- bulk pack upload ----------
+    // Expects one PARENT folder containing one subfolder per pack (10 images +
+    // manifest.json each) — same manifest.json shape the single-pack drop zone
+    // already understands (items:[{keyword,file}], optional INTRO_CAPTION/CTA_CAPTION).
+    batchFolderInput.addEventListener('change', async e=>{
+      const files = Array.from(e.target.files || []);
+      batchFolderInput.value = '';
+      if(!files.length) return;
+
+      const groups = new Map(); // subfolder name -> {manifestFile, imageFiles:[]}
       for(const f of files){
         const rel = f.webkitRelativePath || f.name;
         const parts = rel.split('/');
-        const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '__root__';
-        if(!byDir.has(dir)) byDir.set(dir, []);
-        byDir.get(dir).push(f);
-      }
-      const packs = [];
-      const skipped = [];
-      for(const [dir, groupFiles] of byDir.entries()){
-        const manifestFile = groupFiles.find(f => /manifest(\s\(\d+\))?\.json$/i.test(f.name));
-        if(!manifestFile){ skipped.push(dir); continue; }
-        const imageFiles = groupFiles.filter(f => f !== manifestFile && isImageFile(f));
-        const folderName = dir === '__root__' ? (manifestFile.webkitRelativePath || manifestFile.name).split('/').slice(-2,-1)[0] || dir : dir.split('/').pop();
-        packs.push({ folderName, manifestFile, imageFiles, dir });
-      }
-      packs.sort((a,b)=>{
-        const na = (a.folderName.match(/(\d+)(?!.*\d)/)||[])[1];
-        const nb = (b.folderName.match(/(\d+)(?!.*\d)/)||[])[1];
-        if(na != null && nb != null) return (+na) - (+nb);
-        return a.folderName.localeCompare(b.folderName, undefined, {numeric:true});
-      });
-      console.debug('[batch] scanned', files.length, 'file(s) across', byDir.size, 'folder(s) —', packs.length, 'pack(s) with a manifest.json,', skipped.length, 'without.');
-      return { packs, skipped };
-    }
-
-    async function readManifestJson(file){
-      return JSON.parse(await file.text());
-    }
-
-    const STATUS_META = {
-      queued:            { label:'queued',            color:'rgba(242,240,230,0.45)', bg:'#14170f' },
-      processing:        { label:'preparing…',        color:'#ffd60a',                bg:'#1c1a0c' },
-      ready_for_review:  { label:'good to go',         color:'#8fd19e',                bg:'#122016' },
-      no_match:          { label:'no mp3 match',       color:'#e0a84a',                bg:'#211a0e' },
-      rendering:         { label:'rendering…',        color:'#ff9500',                bg:'#221708' },
-      done:              { label:'done',               color:'var(--green-bright)',    bg:'#0f2317' },
-      error:             { label:'error',              color:'#e0574a',                bg:'#241010' }
-    };
-
-    // ---------- normal mode: bulk uploader + orchestrator ----------
-    if(!embeddedMode){
-      const batchPanelToggle = document.getElementById('batchPanelToggle');
-      const batchPanelBody = document.getElementById('batchPanelBody');
-      const batchPanelCaret = document.getElementById('batchPanelCaret');
-      batchPanelToggle.addEventListener('click', ()=>{
-        const open = batchPanelBody.style.display !== 'none';
-        batchPanelBody.style.display = open ? 'none' : 'block';
-        batchPanelCaret.textContent = open ? '▾' : '▴';
-      });
-
-      const batchFolderBtn = document.getElementById('batchFolderBtn');
-      const batchFolderInput = document.getElementById('batchFolderInput');
-      const batchDropZone = document.getElementById('batchDropZone');
-      const batchIngestStatus = document.getElementById('batchIngestStatus');
-      const batchResumeBox = document.getElementById('batchResumeBox');
-      const batchResumeText = document.getElementById('batchResumeText');
-      const batchResumeBtn = document.getElementById('batchResumeBtn');
-      const batchClearBtn = document.getElementById('batchClearBtn');
-      const batchListWrap = document.getElementById('batchListWrap');
-      const batchListSummary = document.getElementById('batchListSummary');
-      const batchSpeedInput = document.getElementById('batchSpeedInput');
-      const batchGenerateBtn = document.getElementById('batchGenerateBtn');
-      const batchPrepStatus = document.getElementById('batchPrepStatus');
-      const batchOpenGridBtn = document.getElementById('batchOpenGridBtn');
-
-      const batchGridOverlay = document.getElementById('batchGridOverlay');
-      const batchGridCloseBtn = document.getElementById('batchGridCloseBtn');
-      const batchGridTitle = document.getElementById('batchGridTitle');
-      const batchGridSummary = document.getElementById('batchGridSummary');
-      const batchGridLegend = document.getElementById('batchGridLegend');
-      const batchGrid = document.getElementById('batchGrid');
-      const batchDownloadAllBtn = document.getElementById('batchDownloadAllBtn');
-      const batchDownloadAllStatus = document.getElementById('batchDownloadAllStatus');
-
-      const batchReviewOverlay = document.getElementById('batchReviewOverlay');
-      const batchReviewCloseBtn = document.getElementById('batchReviewCloseBtn');
-      const batchReviewTitle = document.getElementById('batchReviewTitle');
-      const batchReviewIframe = document.getElementById('batchReviewIframe');
-
-      const batchPrepIframe = document.getElementById('batchPrepIframe');
-
-      let currentBatchId = localStorage.getItem('activeBatchId') || null;
-      let currentPacks = []; // in-memory mirror of the batchPacks idb records for this batch
-
-      function setIngestStatus(msg, ok){
-        batchIngestStatus.style.color = ok ? 'var(--green-bright)' : '#e0866a';
-        batchIngestStatus.textContent = msg;
+        if(parts.length < 2) continue; // skip stray files directly in the picked root
+        const packFolder = parts[1];
+        if(!groups.has(packFolder)) groups.set(packFolder, { manifestFile:null, imageFiles:[] });
+        const g = groups.get(packFolder);
+        if(/manifest(\s\(\d+\))?\.json$/i.test(f.name)) g.manifestFile = f;
+        else if(f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(f.name)) g.imageFiles.push(f);
       }
 
-      // ---------- recursive drag-and-drop folder reading ----------
-      // <input webkitdirectory> browsing goes through Chrome's native folder
-      // chooser, which — for a page opened as a local file:// document — can
-      // refuse to recurse past the first level (parent folder → pack folder →
-      // files is two levels deep) and silently hand back zero files. Reading
-      // the dropped folder's entries by hand via webkitGetAsEntry() sidesteps
-      // that chooser entirely, so this works the same whether the page is
-      // opened over file://, a local server, or hosted — and at any nesting
-      // depth.
-      function readAllDirEntries(reader){
-        return new Promise((resolve)=>{
-          let all = [];
-          (function readBatch(){
-            reader.readEntries(entries=>{
-              if(!entries.length){ resolve(all); return; }
-              all = all.concat(entries);
-              readBatch(); // Chrome batches ~100 entries per call — keep reading until empty
-            }, ()=>resolve(all));
-          })();
+      if(!groups.size){ batchUploadStatus.style.color = '#e0574a'; batchUploadStatus.textContent = 'No pack subfolders found in that selection.'; return; }
+
+      batchUploadStatus.style.color = 'var(--green-bright)';
+      batchUploadStatus.textContent = 'Reading ' + groups.size + ' pack folder(s)…';
+
+      const existing = await getAllPacks();
+      let nextOrder = existing.reduce((m,p)=> Math.max(m, p.order||0), 0) + 1;
+      let added = 0, failed = 0;
+
+      const folderNames = Array.from(groups.keys()).sort((a,b)=> a.localeCompare(b, undefined, {numeric:true}));
+      for(const folderName of folderNames){
+        const g = groups.get(folderName);
+        if(!g.manifestFile){ failed++; continue; }
+        let manifestJson;
+        try{ manifestJson = JSON.parse(await g.manifestFile.text()); }
+        catch(err){ failed++; continue; }
+        if(!Array.isArray(manifestJson.items) || !manifestJson.items.length){ failed++; continue; }
+
+        const numMatch = folderName.match(/(\d+)/);
+        const order = numMatch ? parseInt(numMatch[1], 10) : nextOrder++;
+        const id = 'pack_' + order + '_' + folderName.replace(/[^a-z0-9]/gi,'').slice(0,24) + '_' + Date.now().toString(36);
+
+        await putPack({
+          id, order, name: folderName,
+          manifest: manifestJson,
+          images: g.imageFiles,
+          maxSpeed: parseFloat(batchMaxSpeed.value) || 1.12,
+          status: 'pending',
+          error: null,
+          createdAt: Date.now()
         });
-      }
-      async function readEntryRecursively(entry, path, out){
-        if(!entry) return;
-        if(entry.isFile){
-          await new Promise(resolve=>{
-            entry.file(file=>{
-              try{ Object.defineProperty(file, 'webkitRelativePath', { value: path + file.name, configurable:true }); }
-              catch(e){ /* fine — grouping falls back to the flat name */ }
-              out.push(file);
-              resolve();
-            }, ()=>resolve());
-          });
-        } else if(entry.isDirectory){
-          const reader = entry.createReader();
-          const entries = await readAllDirEntries(reader);
-          for(const en of entries) await readEntryRecursively(en, path + entry.name + '/', out);
-        }
-      }
-      async function collectFilesFromDataTransfer(dataTransfer){
-        const items = Array.from(dataTransfer.items || []);
-        const entries = items.map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
-        if(!entries.length) return Array.from(dataTransfer.files || []); // very old browser fallback
-        const out = [];
-        for(const en of entries) await readEntryRecursively(en, '', out);
-        return out;
+        added++;
       }
 
-      async function ingestFiles(files){
-        console.debug('[batch] files ready for ingest:', files ? files.length : 0);
-        if(!files || !files.length){
-          setIngestStatus('No files were returned for that folder — reselect and make sure the folder actually contains the pack subfolders (with manifest.json + images inside). If the button keeps returning nothing, use the drag-and-drop box above instead — it reads nested subfolders directly and is far more reliable, especially when this page is opened as a local file.', false);
-          return;
-        }
-        setIngestStatus(`Reading ${files.length} file(s)…`, true);
-        const { packs, skipped } = groupFilesIntoPacks(files);
-        if(!packs.length){
-          setIngestStatus(`Scanned ${files.length} file(s) in ${skipped.length} folder(s) — none contained a manifest.json. Select the folder that directly holds (or contains subfolders that directly hold) each pack's manifest.json + images.`, false);
-          return;
-        }
-
-        currentBatchId = 'batch_' + Date.now();
-        localStorage.setItem('activeBatchId', currentBatchId);
-        currentPacks = [];
-
-        let order = 0;
-        const badManifests = [];
-        for(const p of packs){
-          order++;
-          let root;
-          try{ root = await readManifestJson(p.manifestFile); }
-          catch(err){ badManifests.push(p.folderName); continue; }
-          const items = Array.isArray(root) ? root : (Array.isArray(root.items) ? root.items : []);
-          const record = {
-            batchId: currentBatchId, order, folderName: p.folderName,
-            root: Array.isArray(root) ? {} : root, items, imageFiles: p.imageFiles,
-            status: 'queued', error: null
-          };
-          const id = await idbPut('batchPacks', record);
-          record.id = id;
-          currentPacks.push(record);
-        }
-
-        const allSkipped = skipped.concat(badManifests);
-        setIngestStatus(`Loaded ${currentPacks.length} pack${currentPacks.length===1?'':'s'}${allSkipped.length ? `, skipped ${allSkipped.length}: ${allSkipped.slice(0,5).join(', ')}${allSkipped.length>5?'…':''}` : ''}.`, true);
-        renderBatchSummary();
-        openGrid(); // land straight on the grid — nothing to configure first
+      batchUploadStatus.style.color = added ? 'var(--green-bright)' : '#e0574a';
+      batchUploadStatus.textContent = added + ' pack(s) added' + (failed ? ', ' + failed + ' skipped (missing/broken manifest.json)' : '') + '.';
+      const all = await getAllPacks();
+      if(all.length){
+        batchRangeStart.value = Math.min(...all.map(p=>p.order));
+        batchRangeEnd.value = Math.max(...all.map(p=>p.order));
       }
+      renderBatchList();
+      renderQuickbarCounts();
+    });
 
-      batchFolderBtn.addEventListener('click', ()=> batchFolderInput.click());
-      batchFolderInput.addEventListener('change', async (e)=>{
-        const files = e.target.files;
-        batchFolderInput.value = '';
-        await ingestFiles(files);
-      });
+    function packStatusDot(status){
+      const c = { pending:'rgba(242,240,230,0.3)', processing:'#e0a94a', awaiting_review:'#1fae66', complete:'#3d8bfd', error:'#e0574a' }[status] || '#666';
+      return `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:6px;"></span>`;
+    }
 
-      ['dragenter','dragover'].forEach(ev=>batchDropZone.addEventListener(ev, e=>{
-        e.preventDefault(); e.stopPropagation();
-        batchDropZone.style.borderColor = 'var(--green-bright)';
-        batchDropZone.style.background = 'rgba(31,174,102,0.06)';
-      }));
-      ['dragleave','drop'].forEach(ev=>batchDropZone.addEventListener(ev, e=>{
-        e.preventDefault(); e.stopPropagation();
-        batchDropZone.style.borderColor = 'var(--line)';
-        batchDropZone.style.background = 'transparent';
-      }));
-      batchDropZone.addEventListener('click', ()=> batchFolderInput.click());
-      batchDropZone.addEventListener('drop', async e=>{
-        if(!e.dataTransfer) return;
-        setIngestStatus('Reading dropped folder…', true);
-        const files = await collectFilesFromDataTransfer(e.dataTransfer);
-        await ingestFiles(files);
-      });
-
-      async function checkForResumableBatch(){
-        const all = await idbGetAll('batchPacks');
-        const unfinished = all.filter(p => p.status !== 'done');
-        if(!unfinished.length) return;
-        const byBatch = new Map();
-        for(const p of unfinished){ if(!byBatch.has(p.batchId)) byBatch.set(p.batchId, []); byBatch.get(p.batchId).push(p); }
-        const sortedBatches = [...byBatch.entries()].sort((a,b)=>b[1].length-a[1].length);
-        const [batchId, packs] = sortedBatches[0];
-        batchResumeBox.style.display = 'block';
-        batchResumeText.textContent = `Found an unfinished batch — ${packs.length} pack(s) not yet done.`;
-        batchResumeBtn.onclick = async ()=>{
-          currentBatchId = batchId;
-          localStorage.setItem('activeBatchId', currentBatchId);
-          currentPacks = (await idbGetAll('batchPacks')).filter(p=>p.batchId===batchId).sort((a,b)=>a.order-b.order);
-          batchResumeBox.style.display = 'none';
-          renderBatchSummary();
-          openGrid();
-        };
-        batchClearBtn.onclick = async ()=>{
-          for(const p of unfinished) await idbDelete('batchPacks', p.id);
-          batchResumeBox.style.display = 'none';
-          setIngestStatus('Old batch cleared.', true);
-        };
-      }
-      checkForResumableBatch();
-      // if a batch is already active from a previous session, surface it immediately —
-      // no need to reselect the folder just to get back to the grid.
-      (async ()=>{
-        if(!currentBatchId) return;
-        const all = (await idbGetAll('batchPacks')).filter(p=>p.batchId===currentBatchId).sort((a,b)=>a.order-b.order);
-        if(all.length){ currentPacks = all; renderBatchSummary(); }
-      })();
-
-      function renderBatchSummary(){
-        batchListWrap.style.display = currentPacks.length ? 'block' : 'none';
-        const counts = {};
-        currentPacks.forEach(p=>{ counts[p.status] = (counts[p.status]||0)+1; });
-        batchListSummary.textContent = `${currentPacks.length} pack(s) loaded — ` +
-          Object.entries(counts).map(([k,v])=>`${v} ${(STATUS_META[k]||{label:k}).label}`).join(', ');
-      }
-
-      // ---------- background prep: ONE hidden iframe, one pack at a time ----------
-      let prepQueue = [];
-      let prepRunning = false;
-      let prepWaiter = null; // resolves when the currently-loading iframe reports done
-
-      function baseUrl(){ return location.origin + location.pathname; }
-
-      batchGenerateBtn.addEventListener('click', ()=>{
-        if(!currentPacks.length){ setIngestStatus('Select a packs folder first.', false); return; }
-        const todo = currentPacks.filter(p => p.status === 'queued' || p.status === 'error' || p.status === 'no_match');
-        if(!todo.length){ batchPrepStatus.textContent = 'Every pack is already prepared or in progress.'; return; }
-        startPrep(todo.map(p=>p.id));
-      });
-
-      function startPrep(packIds){
-        prepQueue = prepQueue.concat(packIds.filter(id => !prepQueue.includes(id)));
-        if(!prepRunning) runPrepQueue();
-      }
-
-      async function runPrepQueue(){
-        prepRunning = true;
-        const speed = +batchSpeedInput.value || 1.12;
-        let doneCount = currentPacks.filter(p=>p.status==='ready_for_review'||p.status==='done'||p.status==='no_match').length;
-        const total = currentPacks.length;
-        while(prepQueue.length){
-          const packId = prepQueue.shift();
-          const idx = currentPacks.findIndex(p=>p.id===packId);
-          if(idx<0) continue;
-          currentPacks[idx].status = 'processing';
-          renderGrid(); renderBatchSummary();
-          batchPrepStatus.textContent = `Preparing pack #${currentPacks[idx].order} (${currentPacks[idx].folderName}) — ${doneCount}/${total} done so far…`;
-
-          const result = await new Promise(resolve=>{
-            prepWaiter = resolve;
-            batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
-          });
-
-          const rec = await idbGet('batchPacks', packId).catch(()=>null);
-          if(rec){
-            rec.status = result.status;
-            rec.error = result.note || null;
-            await idbPut('batchPacks', rec);
-          }
-          if(idx>=0){ currentPacks[idx].status = result.status; currentPacks[idx].error = result.note || null; }
-          doneCount++;
-          renderGrid(); renderBatchSummary();
-        }
-        prepRunning = false;
-        batchPrepStatus.textContent = `Auto-prepare complete — ${doneCount}/${total} pack(s) processed. Open the grid to review.`;
-        batchPrepIframe.removeAttribute('src');
-      }
-
-      window.addEventListener('message', (ev)=>{
-        const data = ev.data;
-        if(!data || typeof data !== 'object') return;
-        if(data.type === 'PREP_PACK_DONE' && prepWaiter){
-          const resolve = prepWaiter; prepWaiter = null;
-          resolve({ status: data.status, note: data.note });
-        }
-      });
-
-      // ---------- the grid ----------
-      function openGrid(){
-        batchGridOverlay.style.display = 'flex';
-        batchGridTitle.textContent = `Pack grid — ${currentPacks.length} pack(s)`;
-        renderGrid();
-      }
-      batchOpenGridBtn.addEventListener('click', openGrid);
-      batchGridCloseBtn.addEventListener('click', ()=>{ batchGridOverlay.style.display = 'none'; });
-      // closing never destroys anything — currentPacks + idb stay put, so the grid
-      // (and everything already prepared/rendered) is right there next time it's opened.
-
-      function renderGrid(){
-        batchGridSummary.textContent = (()=>{
-          const counts = {};
-          currentPacks.forEach(p=>{ counts[p.status] = (counts[p.status]||0)+1; });
-          return Object.entries(counts).map(([k,v])=>`${v} ${(STATUS_META[k]||{label:k}).label}`).join(' · ') || 'No packs yet.';
-        })();
-        batchGridLegend.innerHTML = Object.values(STATUS_META).map(m=>
-          `<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${m.color};margin-right:4px;"></span>${m.label}</span>`
-        ).join('');
-
-        batchGrid.innerHTML = '';
-        currentPacks.forEach(p=>{
-          const meta = STATUS_META[p.status] || STATUS_META.queued;
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          const clickable = p.status !== 'queued' && p.status !== 'processing';
-          btn.title = `${p.folderName} — ${meta.label}${p.error ? ' ('+p.error+')' : ''}`;
-          btn.style.cssText = `aspect-ratio:1;border-radius:6px;border:1px solid ${meta.color};background:${meta.bg};color:${meta.color};font-family:var(--mono);font-weight:800;font-size:13px;cursor:${clickable?'pointer':'default'};opacity:${clickable?'1':'0.6'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:2px;`;
-          btn.innerHTML = `<span>#${p.order}</span><span style="font-size:8px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;">${p.status==='processing'?'…':meta.label}</span>`;
-          if(clickable) btn.addEventListener('click', ()=>openReview(p.id));
-          batchGrid.appendChild(btn);
+    async function renderBatchList(){
+      const packs = await getAllPacks();
+      batchEmpty.style.display = packs.length ? 'none' : 'block';
+      batchList.innerHTML = packs.map(p => `
+        <div class="batch-row" data-pack="${p.id}" style="display:flex;flex-direction:column;gap:4px;font-size:10px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;cursor:pointer;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            ${packStatusDot(p.status)}
+            <span style="flex:1;">Pack ${p.order} — ${p.name}</span>
+            <span style="opacity:.6;text-transform:uppercase;">${p.status.replace('_',' ')}</span>
+          </div>
+          ${p.status==='error' ? `
+          <div style="color:#e0574a;font-size:9px;padding-left:15px;">${(p.error||'Unknown error').replace(/</g,'&lt;')}</div>
+          <div style="display:flex;gap:6px;padding-left:15px;">
+            <button type="button" class="align-btn" data-retry="${p.id}" style="font-size:9px;padding:4px 8px;">↻ Retry this pack</button>
+          </div>` : ''}
+        </div>`).join('');
+      batchList.querySelectorAll('[data-retry]').forEach(btn=>{
+        btn.addEventListener('click', async e=>{
+          e.stopPropagation();
+          const p = await getPack(btn.dataset.retry);
+          if(p){ p.status = 'pending'; p.error = null; await putPack(p); renderBatchList(); refreshProgressUI(); }
         });
-      }
-
-      // ---------- review: one fresh iframe per open, destroyed on close ----------
-      let reviewPackId = null;
-      function openReview(packId){
-        const p = currentPacks.find(x=>x.id===packId);
-        if(!p) return;
-        reviewPackId = packId;
-        batchReviewTitle.textContent = `Pack #${p.order} — ${p.folderName}`;
-        batchReviewOverlay.style.display = 'flex';
-        batchReviewIframe.src = baseUrl() + `?embedded=1&mode=review&packId=${packId}&_t=${Date.now()}`;
-      }
-      function closeReview(){
-        batchReviewOverlay.style.display = 'none';
-        batchReviewIframe.removeAttribute('src'); // fully tear down — next open is always a clean load
-        reviewPackId = null;
-      }
-      batchReviewCloseBtn.addEventListener('click', closeReview);
-
-      window.addEventListener('message', async (ev)=>{
-        const data = ev.data;
-        if(!data || typeof data !== 'object') return;
-        if(data.type === 'REVIEW_PACK_DONE' && data.packId === reviewPackId){
-          const rec = await idbGet('batchPacks', data.packId).catch(()=>null);
-          if(rec){ rec.status = data.ok ? 'done' : 'error'; rec.error = data.ok ? null : data.message; await idbPut('batchPacks', rec); }
-          const idx = currentPacks.findIndex(p=>p.id===data.packId);
-          if(idx>=0){ currentPacks[idx].status = data.ok ? 'done' : 'error'; currentPacks[idx].error = data.ok ? null : data.message; }
-          renderGrid(); renderBatchSummary();
-          if(data.ok) closeReview();
-        }
       });
-
-      // ---------- download all packs as one ZIP, without loading every render into memory at once ----------
-      function crc32(buf){
-        if(!crc32._table){
-          const t = new Uint32Array(256);
-          for(let n=0;n<256;n++){
-            let c = n;
-            for(let k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1);
-            t[n] = c >>> 0;
+      batchList.querySelectorAll('.batch-row').forEach(row=>{
+        row.addEventListener('click', async ()=>{
+          const p = await getPack(row.dataset.pack);
+          if(!p) return;
+          if(p.status==='awaiting_review' || p.status==='complete'){
+            const rec = await rawGet('packTemplates', p.id);
+            if(rec){ batchModalOverlay.classList.remove('on'); await openPackForReview(p.id); }
           }
-          crc32._table = t;
-        }
-        const table = crc32._table;
-        const view = new Uint8Array(buf);
-        let crc = 0xFFFFFFFF;
-        for(let i=0;i<view.length;i++) crc = table[(crc ^ view[i]) & 0xFF] ^ (crc >>> 8);
-        return (crc ^ 0xFFFFFFFF) >>> 0;
-      }
-
-      // Builds a STORE-method (uncompressed) ZIP by referencing each render's
-      // original Blob directly in the final Blob's parts list instead of copying
-      // every video's bytes into one giant JS buffer first — the browser composes
-      // the parts lazily, so this stays reliable well past a hundred videos.
-      async function buildZip(entries, onProgress){
-        const encoder = new TextEncoder();
-        const parts = [];
-        const centralParts = [];
-        let offset = 0;
-        for(let i=0;i<entries.length;i++){
-          const { name, blob } = entries[i];
-          if(onProgress) onProgress(i+1, entries.length, name);
-          const nameBytes = encoder.encode(name);
-          const buf = await blob.arrayBuffer();
-          const crc = crc32(buf);
-          const size = buf.byteLength;
-
-          const lh = new DataView(new ArrayBuffer(30));
-          lh.setUint32(0, 0x04034b50, true);
-          lh.setUint16(4, 20, true);
-          lh.setUint16(6, 0, true);
-          lh.setUint16(8, 0, true);
-          lh.setUint16(10, 0, true);
-          lh.setUint16(12, 0x21, true);
-          lh.setUint32(14, crc, true);
-          lh.setUint32(18, size, true);
-          lh.setUint32(22, size, true);
-          lh.setUint16(26, nameBytes.length, true);
-          lh.setUint16(28, 0, true);
-          parts.push(lh.buffer, nameBytes, blob); // blob, not buf — keeps this out of JS heap
-
-          const ch = new DataView(new ArrayBuffer(46));
-          ch.setUint32(0, 0x02014b50, true);
-          ch.setUint16(4, 20, true);
-          ch.setUint16(6, 20, true);
-          ch.setUint16(8, 0, true);
-          ch.setUint16(10, 0, true);
-          ch.setUint16(12, 0, true);
-          ch.setUint16(14, 0x21, true);
-          ch.setUint32(16, crc, true);
-          ch.setUint32(20, size, true);
-          ch.setUint32(24, size, true);
-          ch.setUint16(28, nameBytes.length, true);
-          ch.setUint16(30, 0, true);
-          ch.setUint16(32, 0, true);
-          ch.setUint16(34, 0, true);
-          ch.setUint16(36, 0, true);
-          ch.setUint32(38, 0, true);
-          ch.setUint32(42, offset, true);
-          centralParts.push(ch.buffer, nameBytes);
-
-          offset += lh.buffer.byteLength + nameBytes.length + size;
-        }
-        const centralStart = offset;
-        const centralSize = centralParts.reduce((a,b)=>a+b.byteLength,0);
-        const end = new DataView(new ArrayBuffer(22));
-        end.setUint32(0, 0x06054b50, true);
-        end.setUint16(4, 0, true);
-        end.setUint16(6, 0, true);
-        end.setUint16(8, entries.length, true);
-        end.setUint16(10, entries.length, true);
-        end.setUint32(12, centralSize, true);
-        end.setUint32(16, centralStart, true);
-        end.setUint16(20, 0, true);
-
-        return new Blob([...parts, ...centralParts, end.buffer], { type:'application/zip' });
-      }
-
-      function setDownloadAllStatus(msg){
-        batchDownloadAllStatus.style.display = msg ? 'block' : 'none';
-        batchDownloadAllStatus.textContent = msg || '';
-      }
-
-      batchDownloadAllBtn.addEventListener('click', async ()=>{
-        const donePacks = currentPacks.filter(p=>p.status==='done');
-        if(!donePacks.length){ setDownloadAllStatus('No packs marked done yet — review and click "Reviewed — Good to Go" on at least one first.'); return; }
-        batchDownloadAllBtn.disabled = true;
-        try{
-          const entries = [];
-          for(const p of donePacks){
-            const rec = await idbGet('batchRenders', p.id).catch(()=>null);
-            if(rec && rec.blob){
-              const safeName = (p.folderName || ('pack-'+p.order)).replace(/[^a-z0-9-_ ]/gi,'').trim().replace(/\s+/g,'-') || ('pack-'+p.order);
-              entries.push({ name: `${String(p.order).padStart(3,'0')}-${safeName}.mp4`, blob: rec.blob });
-            }
-          }
-          if(!entries.length){ setDownloadAllStatus('Renders were not found in the cache — reopen each pack and hit "Reviewed — Good to Go" again.'); return; }
-          const zipBlob = await buildZip(entries, (i,total,name)=> setDownloadAllStatus(`Zipping ${i}/${total} — ${name}…`));
-          setDownloadAllStatus(`Done — ${entries.length} video(s) zipped. Starting download…`);
-          const url = URL.createObjectURL(zipBlob);
-          const a = document.createElement('a');
-          a.href = url; a.download = `${currentBatchId || 'batch'}-packs.zip`;
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(()=>URL.revokeObjectURL(url), 30000);
-          setDownloadAllStatus(`Downloaded ${entries.length} video(s) as one ZIP.`);
-        } catch(err){
-          console.error(err);
-          setDownloadAllStatus('ZIP build failed: ' + ((err&&err.message)||'unknown error') + '. Try downloading fewer packs at a time.');
-        } finally {
-          batchDownloadAllBtn.disabled = false;
-        }
+        });
       });
+      renderQuickbarCounts();
     }
 
-    // ---------- embedded mode=prep: headless, one pack, no UI ----------
-    if(embeddedMode === 'prep'){
-      const batchPanel = document.getElementById('batchPanel');
-      if(batchPanel) batchPanel.style.display = 'none';
-
-      (async function runPrep(){
-        const speed = +(urlParams.get('speed')) || 1.12;
-        let status = 'error', note = null;
-        try{
-          const rec = await idbGet('batchPacks', embeddedPackId);
-          if(!rec) throw new Error('Pack not found — it may have been cleared.');
-          currentPackFilename = (rec.folderName || ('pack-'+rec.order)).replace(/[^a-z0-9-_ ]/gi,'').trim().replace(/\s+/g,'-') + '.mp4';
-
-          await applyManifest(rec.items, rec.imageFiles, rec.root);
-          applyLockedCaptionRules();
-
-          const matchResult = await performFindMatchMp3();
-          if(matchResult.status !== 'applied'){
-            status = 'no_match';
-            note = matchResult.message || 'No confident MP3 match — assign one manually in review.';
-          } else {
-            const speedResult = await performApplyVoiceSpeed(speed);
-            if(!speedResult.ok){
-              status = 'error'; note = speedResult.message || 'Speed step failed.';
-            } else {
-              const syncResult = await performVoiceSync();
-              if(!syncResult.ok){
-                status = 'error'; note = syncResult.message || 'Sync failed.';
-              } else {
-                status = 'ready_for_review';
-              }
-            }
-          }
-        } catch(err){
-          console.error(err);
-          status = 'error'; note = (err && err.message) || String(err);
-        }
-
-        try{
-          await applyDefaultBackgroundMusic();
-          const template = await collectTemplate();
-          await idbPut('batchPackTemplates', { id: embeddedPackId, template });
-        } catch(err){
-          console.error('saving prepared template failed', err);
-          if(status !== 'error'){ status = 'error'; note = 'Prepared, but saving the project failed: ' + ((err&&err.message)||err); }
-        }
-
-        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note }, '*');
-      })();
+    async function renderQuickbarCounts(){
+      const packs = await getAllPacks();
+      qbPackCount.style.display = packs.length ? 'inline-block' : 'none';
+      qbPackCount.textContent = packs.length;
+      const reviewCount = packs.filter(p=>p.status==='awaiting_review').length;
+      qbReviewCount.style.display = reviewCount ? 'inline-block' : 'none';
+      qbReviewCount.textContent = reviewCount;
     }
 
-    // ---------- embedded mode=review: the real editor, one pack, then back to the grid ----------
-    if(embeddedMode === 'review'){
-      const banner = document.createElement('div');
-      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#101210;border-bottom:1px solid var(--line);padding:8px 12px;font-family:var(--mono);font-size:11px;color:var(--paper);display:flex;justify-content:space-between;align-items:center;gap:10px;';
-      banner.innerHTML = `
-        <span id="reviewStatusText">Loading pack…</span>
-        <button type="button" id="reviewGoodBtn" disabled style="background:#2a2a1a;color:rgba(242,240,230,0.4);border:1px solid var(--line);border-radius:4px;padding:8px 14px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:not-allowed;">Reviewed — Good to Go</button>
-      `;
-      document.body.prepend(banner);
-      document.body.style.paddingTop = '40px';
-      const statusText = banner.querySelector('#reviewStatusText');
-      const reviewBtn = banner.querySelector('#reviewGoodBtn');
+    // ---------- orchestrator ----------
+    let queue = [];           // pending pack ids, in order
+    let activeIframes = new Map(); // window handle -> packId ("iframes" name kept, now real tabs)
+    let stopRequested = false;
 
-      function setReviewEnabled(enabled){
-        reviewBtn.disabled = !enabled;
-        reviewBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
-        reviewBtn.style.background = enabled ? 'var(--green-bright)' : '#2a2a1a';
-        reviewBtn.style.color = enabled ? '#06120b' : 'rgba(242,240,230,0.4)';
+    async function refreshProgressUI(){
+      const meta = await getMeta();
+      const packs = await getAllPacks();
+      const inRange = packs.filter(p => p.order >= meta.rangeStart && p.order <= meta.rangeEnd);
+      const done = inRange.filter(p => p.status==='awaiting_review' || p.status==='complete' || p.status==='error').length;
+      const total = inRange.length || 1;
+      batchProgressBar.style.display = meta.running || done>0 ? 'block' : 'none';
+      batchProgressFill.style.width = Math.round((done/total)*100) + '%';
+      const processing = inRange.filter(p=>p.status==='processing').length;
+      const errored = inRange.filter(p=>p.status==='error').length;
+      batchStatus.textContent = meta.running
+        ? `Running — ${processing} processing, ${done}/${total} done${errored?`, ${errored} failed`:''}.`
+        : (done>0 ? `Paused — ${done}/${total} done${errored?`, ${errored} failed`:''}. Resume to continue.` : '');
+      batchStartBtn.style.display = meta.running ? 'none' : 'inline-flex';
+      batchStartBtn.textContent = done>0 && done<total ? '▶ Resume workflow' : '▶ Start workflow';
+      batchPauseBtn.style.display = meta.running ? 'inline-flex' : 'none';
+      renderBatchList();
+    }
+
+    window.addEventListener('message', ev=>{
+      const data = ev.data;
+      if(!data || data.type !== 'hs-pack-done') return;
+      // match by window reference first (reliable even if two packs share an id race),
+      // fall back to packId lookup
+      let entry = Array.from(activeIframes.entries()).find(([win])=> win === ev.source);
+      if(!entry) entry = Array.from(activeIframes.entries()).find(([,pid])=> pid === data.packId);
+      if(!entry) return;
+      const [win] = entry;
+      activeIframes.delete(win);
+      // only success tabs self-close (see headless branch); error tabs stay open for review
+      refreshProgressUI();
+      renderReviewQueueList();
+      spawnNext();
+    });
+
+    async function spawnNext(){
+      const meta = await getMeta();
+      if(stopRequested || !meta.running) { await maybeFinishRun(); return; }
+      if(!queue.length){ await maybeFinishRun(); return; }
+      if(activeIframes.size >= (meta.concurrency || 3)) return;
+
+      const packId = queue.shift();
+      const pack = await getPack(packId);
+      if(!pack || pack.status !== 'pending'){ spawnNext(); return; }
+      pack.status = 'processing';
+      await putPack(pack);
+
+      // real, visible browser tab (not a hidden iframe) — the point is you can click
+      // over to it and see exactly what step it's on, or read the error if it fails.
+      const tabName = 'hs_pack_' + packId;
+      const win = window.open(location.pathname + '?headless=1&packId=' + encodeURIComponent(packId), tabName);
+      if(!win){
+        // popup blocked — this pack never got a worker tab, so mark it back to
+        // pending and tell the user clearly instead of silently doing nothing
+        pack.status = 'pending';
+        await putPack(pack);
+        batchUploadStatus.style.color = '#e0574a';
+        batchUploadStatus.textContent = 'Browser blocked the worker tabs. Allow popups for this page/file, then click Start workflow again.';
+        stopRequested = true;
+        const m = await getMeta(); m.running = false; await putMeta(m);
+        refreshProgressUI();
+        return;
+      }
+      activeIframes.set(win, packId);
+      refreshProgressUI();
+
+      // keep filling remaining concurrency slots
+      spawnNext();
+    }
+
+    async function maybeFinishRun(){
+      if(activeIframes.size > 0) return; // still work in flight
+      const meta = await getMeta();
+      if(meta.running && !queue.length){
+        meta.running = false;
+        await putMeta(meta);
+      }
+      refreshProgressUI();
+    }
+
+    async function startOrResumeWorkflow(){
+      const rangeStart = Math.max(1, parseInt(batchRangeStart.value,10) || 1);
+      const rangeEnd = Math.max(rangeStart, parseInt(batchRangeEnd.value,10) || rangeStart);
+      const maxSpeed = Math.max(0.5, Math.min(2, parseFloat(batchMaxSpeed.value) || 1.12));
+      const concurrency = Math.max(1, Math.min(6, parseInt(batchConcurrency.value,10) || 3));
+
+      if(!groqKeyInput.value.trim()){
+        batchUploadStatus.style.color = '#e0574a';
+        batchUploadStatus.textContent = 'Add a Groq API key in the Voice-over library panel first — sync needs it.';
+        return;
       }
 
-      (async function loadForReview(){
-        try{
-          const rec = await idbGet('batchPacks', embeddedPackId);
-          if(!rec) throw new Error('Pack not found — it may have been cleared.');
-          currentPackFilename = (rec.folderName || ('pack-'+rec.order)).replace(/[^a-z0-9-_ ]/gi,'').trim().replace(/\s+/g,'-') + '.mp4';
+      const packs = await getAllPacks();
+      // crash-safety: anything still marked "processing" from a previous session
+      // that never got a chance to report back gets reset to pending here.
+      for(const p of packs){
+        if(p.status === 'processing'){ p.status = 'pending'; await putPack(p); }
+      }
+      const inRange = packs.filter(p => p.order >= rangeStart && p.order <= rangeEnd);
+      if(!inRange.length){
+        batchUploadStatus.style.color = '#e0574a';
+        batchUploadStatus.textContent = 'No uploaded packs fall inside that range.';
+        return;
+      }
+      // per-pack speed follows the currently configured max
+      for(const p of inRange){ if(p.maxSpeed !== maxSpeed){ p.maxSpeed = maxSpeed; await putPack(p); } }
 
-          await applyManifest(rec.items, rec.imageFiles, rec.root);
-
-          const tRec = await idbGet('batchPackTemplates', embeddedPackId).catch(()=>null);
-          if(tRec && tRec.template){
-            await applyTemplate(tRec.template);
-          } else {
-            applyLockedCaptionRules();
-            await applyDefaultBackgroundMusic();
-          }
-          statusText.textContent = `Pack #${rec.order} — ${rec.folderName}. Review the video, then click "Reviewed — Good to Go".`;
-          setReviewEnabled(true);
-        } catch(err){
-          console.error(err);
-          statusText.textContent = 'Load failed: ' + ((err&&err.message)||err);
-        }
-      })();
-
-      reviewBtn.addEventListener('click', async ()=>{
-        setReviewEnabled(false);
-        statusText.textContent = 'Rendering & downloading…';
-        const result = await performExportAndDownload({ autoDownload:true });
-        if(result && result.ok){
-          try{ await idbPut('batchRenders', { id: embeddedPackId, blob: result.blob }); }
-          catch(err){ console.error('caching render for ZIP failed', err); }
-          statusText.textContent = 'Done — downloaded. Returning to the grid…';
-          parent.postMessage({ type:'REVIEW_PACK_DONE', packId: embeddedPackId, ok:true, filename: result.filename }, '*');
-        } else {
-          statusText.textContent = `Render failed: ${(result&&result.message)||'unknown error'}. Fix and click Reviewed again.`;
-          setReviewEnabled(true);
-          parent.postMessage({ type:'REVIEW_PACK_DONE', packId: embeddedPackId, ok:false, message:(result&&result.message)||'Render failed.' }, '*');
-        }
-      });
+      await putMeta({ key:'run', running:true, rangeStart, rangeEnd, maxSpeed, concurrency });
+      stopRequested = false;
+      queue = inRange.filter(p=>p.status==='pending').map(p=>p.id);
+      batchUploadStatus.textContent = '';
+      refreshProgressUI();
+      for(let i=0;i<concurrency;i++) spawnNext();
     }
+
+    // if the user manually closes an error/worker tab instead of leaving it to
+    // self-close, its concurrency slot would otherwise stay stuck forever
+    setInterval(()=>{
+      let freed = false;
+      for(const [win, pid] of Array.from(activeIframes.entries())){
+        if(win.closed){ activeIframes.delete(win); freed = true; }
+      }
+      if(freed) spawnNext();
+    }, 1500);
+
+    batchStartBtn.addEventListener('click', startOrResumeWorkflow);
+    batchResumeBtn.addEventListener('click', startOrResumeWorkflow);
+    batchPauseBtn.addEventListener('click', async ()=>{
+      stopRequested = true;
+      const meta = await getMeta();
+      meta.running = false;
+      await putMeta(meta);
+      refreshProgressUI();
+    });
+
+    // resume automatically on load if a previous session left the workflow running
+    // (e.g. the tab/computer was closed mid-pack) — continues the unfinished packs
+    // in that same range instead of starting the whole batch over.
+    (async function autoResume(){
+      await sleep(300); // let openDB()/schema settle first
+      const meta = await getMeta();
+      if(!meta.running) { refreshProgressUI(); renderReviewQueueList(); renderQuickbarCounts(); return; }
+      batchRangeStart.value = meta.rangeStart;
+      batchRangeEnd.value = meta.rangeEnd;
+      batchMaxSpeed.value = meta.maxSpeed;
+      batchConcurrency.value = meta.concurrency;
+      const packs = await getAllPacks();
+      for(const p of packs){ if(p.status==='processing'){ p.status='pending'; await putPack(p); } }
+      const inRange = packs.filter(p => p.order >= meta.rangeStart && p.order <= meta.rangeEnd && p.status==='pending');
+      queue = inRange.map(p=>p.id);
+      stopRequested = false;
+      if(queue.length){
+        batchStatus.textContent = `Resuming — ${queue.length} pack(s) left from before.`;
+        for(let i=0;i<(meta.concurrency||3);i++) spawnNext();
+      } else {
+        meta.running = false; await putMeta(meta);
+      }
+      refreshProgressUI();
+      renderReviewQueueList();
+      renderQuickbarCounts();
+    })();
+
+    // ---------- review queue ----------
+    let currentReviewPackId = null;
+
+    async function renderReviewQueueList(){
+      const packs = (await getAllPacks()).filter(p=>p.status==='awaiting_review');
+      reviewQueueEmpty.style.display = packs.length ? 'none' : 'block';
+      reviewQueueList.innerHTML = packs.map(p => `
+        <button type="button" class="align-btn" data-open-review="${p.id}" style="display:flex;justify-content:space-between;text-align:left;">
+          <span>Pack ${p.order} — ${p.name}</span><span style="opacity:.6;">Open ›</span>
+        </button>`).join('');
+      reviewQueueList.querySelectorAll('[data-open-review]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ reviewQueueModalOverlay.classList.remove('on'); openPackForReview(btn.dataset.openReview); });
+      });
+      renderQuickbarCounts();
+    }
+
+    async function openPackForReview(packId){
+      const rec = await rawGet('packTemplates', packId);
+      const pack = await getPack(packId);
+      if(!rec || !pack){ return; }
+      await applyTemplate(rec.template);
+      currentReviewPackId = packId;
+      reviewBar.style.display = 'flex';
+      reviewBarLabel.textContent = `Reviewing Pack ${pack.order} — ${pack.name}`;
+      reviewGoodBtn.disabled = false;
+      reviewGoodBtn.textContent = '✓ Reviewed — Good to go';
+      window.scrollTo({top:0, behavior:'smooth'});
+    }
+
+    async function openNextInReviewQueue(){
+      const packs = (await getAllPacks()).filter(p=>p.status==='awaiting_review');
+      if(packs.length){ await openPackForReview(packs[0].id); }
+      else { reviewBar.style.display = 'none'; currentReviewPackId = null; }
+      renderReviewQueueList();
+    }
+
+    reviewSkipBtn.addEventListener('click', ()=>{ reviewBar.style.display = 'none'; currentReviewPackId = null; });
+
+    reviewGoodBtn.addEventListener('click', ()=>{
+      if(!currentReviewPackId) return;
+      if(loadedCount() < N){ reviewBarLabel.textContent = 'Load all 10 images before exporting.'; return; }
+      reviewGoodBtn.disabled = true;
+      reviewGoodBtn.textContent = 'Rendering…';
+      genBtn.click(); // exact same render/export/download/gallery-save path as the manual "Generate video" button
+    });
+
+    document.addEventListener('hs:exportDone', async ev=>{
+      if(!currentReviewPackId) return;
+      const packId = currentReviewPackId;
+      if(ev.detail && ev.detail.ok){
+        const pack = await getPack(packId);
+        if(pack){ pack.status = 'complete'; pack.reviewedAt = Date.now(); await putPack(pack); }
+        await rawDelete('packTemplates', packId);
+        currentReviewPackId = null;
+        await openNextInReviewQueue();
+      } else {
+        reviewGoodBtn.disabled = false;
+        reviewGoodBtn.textContent = '✓ Reviewed — Good to go';
+        reviewBarLabel.textContent = 'Export failed — fix and try again, or Skip.';
+      }
+      renderBatchList();
+    });
   })();
+  // ================= END BATCH AUTOMATION + REVIEW QUEUE LAYER =================
 
   refreshAll();
 })();
