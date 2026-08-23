@@ -5312,19 +5312,27 @@
     genBtn.textContent = 'Generate video';
     drawPreviewFrame(0);
 
+    // FIX: download fires immediately, right after the blob/link are ready —
+    // still inside the same call chain as the user's "Reviewed — Good to Go"
+    // click. Previously this waited on saveVideoToGallery() first; if that
+    // IndexedDB write stalled (large blob, big library, slow disk) the
+    // download never fired even though rendering had reached 100%. Saving to
+    // the gallery now happens after, and can never block the download.
+    if(autoDownload){
+      dlLink.click();
+    }
+
     try{
-      await saveVideoToGallery(finalBlob);
+      // 15s safety cap — a stuck gallery write must never hang the pipeline.
+      await Promise.race([
+        saveVideoToGallery(finalBlob),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('Gallery save timed out after 15s')), 15000))
+      ]);
     } catch(err){
       console.error('saving to gallery failed', err);
       showTmplStatus('Video downloaded but could not save to gallery.', true);
     }
 
-    if(autoDownload){
-      // Programmatically trigger the same download the user would get by
-      // clicking "Download .mp4" — safe here because it's still inside the
-      // call chain kicked off by the user's own "Reviewed — Good to Go" click.
-      dlLink.click();
-    }
     return { ok:true, filename, blob: finalBlob };
   }
   genBtn.addEventListener('click', ()=>performExportAndDownload());
@@ -6371,7 +6379,14 @@ Reply with ONLY JSON. No prose, no markdown.`;
       let prepRunning = false;
       let prepWaiter = null; // resolves when the currently-loading iframe reports done
 
-      function baseUrl(){ return location.origin + location.pathname; }
+      function baseUrl(){
+        // FIX: location.origin is an opaque "null" string for file:// pages in
+        // some browsers, which silently broke every baseUrl()-built URL
+        // (including "Back to grid") — navigating to "null/Users/..." is a
+        // no-op with no visible error. location.href minus the query string
+        // works correctly on file://, http://, and https:// alike.
+        return location.href.split('?')[0].split('#')[0];
+      }
 
       batchGenerateBtn.addEventListener('click', ()=>{
         if(!currentPacks.length){ setIngestStatus('Select a packs folder first.', false); return; }
@@ -6404,9 +6419,16 @@ Reply with ONLY JSON. No prose, no markdown.`;
             prepWaiter = finish;
             const timer = setTimeout(()=>{
               console.error('[batch] prep timed out for pack', packId);
-              finish({ status:'error', note:'Prep timed out (60s) — this browser may be blocking the hidden frame, or a required API is missing/slow.' });
+              finish({ status:'error', note:'Prep timed out (180s) — this browser may be blocking the hidden frame, or a required API is missing/slow.' });
               batchPrepIframe.removeAttribute('src');
-            }, 60000);
+              // FIX: 60s was too tight — MP3 match + 1.2x WSOLA stretch + Groq
+              // Whisper sync for a real voice-over routinely takes longer than
+              // that, especially on slower connections. A timeout here fired
+              // mid-pipeline and reported the pack as failed/no_match even
+              // though the pipeline was still legitimately running, which is
+              // why speed/sync silently never landed. 180s gives the sync
+              // step (the slowest part, since it hits a network API) real room.
+            }, 180000);
             batchPrepIframe.onerror = ()=> finish({ status:'error', note:'Hidden prep frame failed to load in this browser.' });
             batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
           });
@@ -6415,6 +6437,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
           if(rec){
             rec.status = result.status;
             rec.error = result.note || null;
+            rec.matchInfo = result.matchInfo || null;
             await idbPut('batchPacks', rec);
           }
           if(idx>=0){ currentPacks[idx].status = result.status; currentPacks[idx].error = result.note || null; }
@@ -6431,20 +6454,42 @@ Reply with ONLY JSON. No prose, no markdown.`;
         if(!data || typeof data !== 'object') return;
         if(data.type === 'PREP_PACK_DONE' && prepWaiter){
           const resolve = prepWaiter; prepWaiter = null;
-          resolve({ status: data.status, note: data.note });
+          resolve({ status: data.status, note: data.note, matchInfo: data.matchInfo });
         }
       });
 
       // ---------- the grid ----------
+      let gridPollTimer = null;
+      async function refreshPacksFromIdb(){
+        if(!currentBatchId) return;
+        const fresh = (await idbGetAll('batchPacks')).filter(p=>p.batchId===currentBatchId).sort((a,b)=>a.order-b.order);
+        if(fresh.length) currentPacks = fresh;
+      }
       function openGrid(){
         batchGridOverlay.style.display = 'flex';
         batchGridTitle.textContent = `Pack grid — ${currentPacks.length} pack(s)`;
         renderGrid();
+        // FIX: reviewing now happens in separate tabs (see openReview), so
+        // this grid tab has to poll IndexedDB itself to see status changes
+        // (e.g. a pack finishing its render+download) made from those other
+        // tabs — nothing pushes updates back to this tab automatically.
+        if(gridPollTimer) clearInterval(gridPollTimer);
+        gridPollTimer = setInterval(async ()=>{
+          if(batchGridOverlay.style.display === 'none') return;
+          await refreshPacksFromIdb();
+          renderGrid();
+        }, 2000);
       }
       batchOpenGridBtn.addEventListener('click', openGrid);
-      batchGridCloseBtn.addEventListener('click', ()=>{ batchGridOverlay.style.display = 'none'; });
+      batchGridCloseBtn.addEventListener('click', ()=>{
+        batchGridOverlay.style.display = 'none';
+        if(gridPollTimer){ clearInterval(gridPollTimer); gridPollTimer = null; }
+      });
       // closing never destroys anything — currentPacks + idb stay put, so the grid
       // (and everything already prepared/rendered) is right there next time it's opened.
+      window.addEventListener('focus', async ()=>{
+        if(batchGridOverlay.style.display !== 'none'){ await refreshPacksFromIdb(); renderGrid(); }
+      });
 
       function renderGrid(){
         batchGridSummary.textContent = (()=>{
@@ -6470,16 +6515,18 @@ Reply with ONLY JSON. No prose, no markdown.`;
         });
       }
 
-      // ---------- review: full top-level navigation to the exact same editor
-      // page (no iframe, no card/modal wrapper) — clicking a pack replaces
-      // this whole page with the real single-video editor for that pack.
-      // Everything needed to come back (batch id, pack list) lives in
-      // localStorage/IndexedDB, not in JS memory, so it survives the navigation.
+      // ---------- review: opens in a NEW TAB (not a same-tab navigation) ----------
+      // FIX: this used to replace the whole grid tab with the editor, so
+      // clicking "Reviewed — Good to Go" blocked the person from doing
+      // anything else until that render finished and downloaded. Opening in
+      // a new tab leaves the grid tab exactly where it was — the person can
+      // switch back immediately and open the next pack while the previous
+      // one is still rendering in its own tab.
       function openReview(packId){
         const p = currentPacks.find(x=>x.id===packId);
         if(!p) return;
         localStorage.setItem('activeBatchId', currentBatchId);
-        window.location.href = baseUrl() + `?embedded=1&mode=review&packId=${packId}&_t=${Date.now()}`;
+        window.open(baseUrl() + `?embedded=1&mode=review&packId=${packId}&_t=${Date.now()}`, '_blank');
       }
 
 window.addEventListener('message', async (ev)=>{
@@ -6620,7 +6667,7 @@ window.addEventListener('message', async (ev)=>{
 
       (async function runPrep(){
         const speed = +(urlParams.get('speed')) || 1.12;
-        let status = 'error', note = null;
+        let status = 'error', note = null, matchInfo = null;
         try{
           const rec = await idbGet('batchPacks', embeddedPackId);
           if(!rec) throw new Error('Pack not found — it may have been cleared.');
@@ -6629,11 +6676,32 @@ window.addEventListener('message', async (ev)=>{
           await applyManifest(rec.items, rec.imageFiles, rec.root);
           applyLockedCaptionRules();
 
-          const matchResult = await performFindMatchMp3();
+          let matchResult = await performFindMatchMp3();
+          // FIX: batch prep is unattended — nobody is there to click "assign
+          // manually" on a sub-80% guess. Previously a 'guess' (or even a
+          // found candidate) below FIND_MATCH_AUTO_THRESHOLD skipped speed
+          // and sync entirely, which is exactly the "no match → no speed →
+          // no sync" chain the user hit. Now: any real candidate gets
+          // force-assigned so speed/sync still run; the pack is still
+          // flagged for a closer look in review if confidence was low.
+          if(matchResult.status === 'guess' && matchResult.name){
+            const voiceovers = (await idbGetAll('voiceovers')).filter(v => v.status === 'done' && v.transcript);
+            const guessVo = voiceovers.find(v => v.name === matchResult.name);
+            if(guessVo){
+              await assignVoiceoverToVideo(guessVo.id, CURRENT_EDITOR_KEY);
+              note = `Low-confidence MP3 match (${Math.round((matchResult.confidence||0)*100)}%) — applied, double-check in review.`;
+              matchResult = { status:'applied', confidence: matchResult.confidence, name: matchResult.name };
+            }
+          }
           if(matchResult.status !== 'applied'){
             status = 'no_match';
             note = matchResult.message || 'No confident MP3 match — assign one manually in review.';
           } else {
+            // FIX: capture the match so the review screen can show the same
+            // "Found it — ..." line the manual button shows — previously this
+            // only ever appeared on the hidden headless iframe's own DOM,
+            // which nobody ever sees, so it looked like matching never ran.
+            matchInfo = { name: matchResult.name, confidence: matchResult.confidence };
             const speedResult = await performApplyVoiceSpeed(speed);
             if(!speedResult.ok){
               status = 'error'; note = speedResult.message || 'Speed step failed.';
@@ -6661,7 +6729,7 @@ window.addEventListener('message', async (ev)=>{
           if(status !== 'error'){ status = 'error'; note = 'Prepared, but saving the project failed: ' + ((err&&err.message)||err); }
         }
 
-        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note }, '*');
+        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo }, '*');
       })();
     }
 
@@ -6682,7 +6750,17 @@ window.addEventListener('message', async (ev)=>{
       const reviewBtn = banner.querySelector('#reviewGoodBtn');
       const backBtn = banner.querySelector('#reviewBackBtn');
 
-      function backToGrid(){ window.location.href = baseUrl(); }
+      function backToGrid(){
+        // FIX: this tab was opened via window.open() from the grid tab, which
+        // is still sitting there open — navigating this tab to the grid page
+        // would just spawn a second, redundant orchestrator. Close this tab
+        // instead so the grid tab (still showing live status, see the
+        // polling added to openGrid) is the one place to keep working from.
+        // window.close() only works on script-opened tabs; if the browser
+        // refuses (e.g. this tab was opened by hand), fall back to navigating.
+        window.close();
+        setTimeout(()=>{ window.location.href = baseUrl(); }, 150);
+      }
       backBtn.addEventListener('click', backToGrid);
 
       function setReviewEnabled(enabled){
@@ -6713,6 +6791,20 @@ window.addEventListener('message', async (ev)=>{
           applyLockedCaptionRules();
           drawPreviewFrame(previewT);
           statusText.textContent = `Pack #${rec.order} — ${rec.folderName}. Review the video, then click "Reviewed — Good to Go".`;
+          // FIX: surface the same "Found it — ..." line the manual button
+          // shows. The actual matching ran during headless prep (on the
+          // hidden iframe's own invisible DOM), so nobody ever saw it — it
+          // only looked like "Find matching MP3" was never triggered. This
+          // replays the saved result onto the real, visible status line.
+          if(rec.matchInfo && rec.matchInfo.name){
+            setFindMatchStatus(`Found it — "${rec.matchInfo.name}" (${Math.round((rec.matchInfo.confidence||0)*100)}% match) — applied.`, true);
+            findMatchResult.style.display = 'block';
+            findMatchResult.innerHTML = `Wrong MP3? Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> and pick a different one from the dropdown — takes one click.`;
+            const link = document.getElementById('findMatchReplaceLink');
+            if(link) link.addEventListener('click', e=>{ e.preventDefault(); openVoiceLibBtn.click(); });
+          } else if(rec.status === 'no_match'){
+            setFindMatchStatus(rec.error || 'No matching voice-over found — assign one manually.', false);
+          }
           setReviewEnabled(true);
         } catch(err){
           console.error(err);
@@ -6721,15 +6813,18 @@ window.addEventListener('message', async (ev)=>{
       })();
 
       reviewBtn.addEventListener('click', async ()=>{
+        // Not disabling navigation away — this tab renders independently of
+        // the grid tab, so the person is free to switch back to the grid
+        // right now and open the next pack while this one renders.
         setReviewEnabled(false);
-        statusText.textContent = 'Rendering & downloading…';
+        statusText.textContent = 'Rendering & downloading… (safe to switch tabs now — this keeps going in the background)';
         const result = await performExportAndDownload({ autoDownload:true });
         if(result && result.ok){
           try{ await idbPut('batchRenders', { id: embeddedPackId, blob: result.blob }); }
           catch(err){ console.error('caching render for ZIP failed', err); }
           const rec = await idbGet('batchPacks', embeddedPackId).catch(()=>null);
           if(rec){ rec.status = 'done'; rec.error = null; await idbPut('batchPacks', rec).catch(()=>{}); }
-          statusText.textContent = 'Done — downloaded. Returning to the grid…';
+          statusText.textContent = 'Done — downloaded. Closing this tab…';
           setTimeout(backToGrid, 600);
         } else {
           const rec = await idbGet('batchPacks', embeddedPackId).catch(()=>null);
