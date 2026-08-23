@@ -798,6 +798,17 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="batchRunnerOverlay" style="display:none;">
+    <div class="modal" style="max-width:min(1400px,96vw);width:96vw;max-height:92vh;overflow:auto;">
+      <div class="modal-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;" id="batchRunnerTitle">Batch run</h3>
+        <button type="button" class="modal-close" id="batchRunnerCloseBtn">✕</button>
+      </div>
+      <div id="batchRunnerSummary" style="font-family:var(--mono);font-size:11px;color:rgba(242,240,230,0.7);margin:8px 0 12px;"></div>
+      <div id="batchRunnerSlots" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:10px;"></div>
+    </div>
+  </div>
+
   <div class="panel">
 
     <div class="field" id="tmplPanel" style="border:1px solid var(--green-bright);border-radius:6px;padding:12px;">
@@ -835,6 +846,48 @@
       <button type="button" id="findMatchBtn" style="width:100%;background:#1c2118;color:var(--green-bright);border:1px solid var(--green-bright);border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">🔎 Find matching MP3</button>
       <div id="findMatchStatus" style="font-size:9.5px;margin-bottom:6px;min-height:12px;"></div>
       <div id="findMatchResult" style="display:none;font-size:9.5px;color:rgba(242,240,230,0.7);margin-bottom:10px;line-height:1.5;"></div>
+
+      <div id="batchPanel" style="border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;cursor:pointer;" id="batchPanelToggle">
+          <div class="dt" style="color:var(--green-bright);">⚡ Bulk pack batch (multiple packs → auto tabs)</div>
+          <span id="batchPanelCaret" style="color:rgba(242,240,230,0.5);">▾</span>
+        </div>
+        <div id="batchPanelBody" style="display:none;">
+          <div class="ds" style="margin-bottom:8px;">Select a parent folder containing several pack subfolders (each with its own manifest.json + images) — e.g. one folder holding Pack 21, Pack 22 … Pack 30.</div>
+          <button type="button" id="batchFolderBtn" class="align-btn" style="width:100%;margin-bottom:8px;">Select packs folder</button>
+          <input type="file" id="batchFolderInput" webkitdirectory directory multiple style="display:none">
+          <div id="batchIngestStatus" style="font-size:9.5px;margin-bottom:8px;min-height:12px;"></div>
+
+          <div id="batchResumeBox" style="display:none;background:rgba(224,168,74,0.08);border:1px solid #e0a84a;border-radius:4px;padding:8px;margin-bottom:8px;font-size:9.5px;">
+            <div id="batchResumeText" style="margin-bottom:6px;color:#e0a84a;"></div>
+            <button type="button" id="batchResumeBtn" class="align-btn" style="width:100%;margin-bottom:4px;">Resume unfinished batch</button>
+            <button type="button" id="batchClearBtn" class="align-btn" style="width:100%;">Clear old batch</button>
+          </div>
+
+          <div id="batchListWrap" style="display:none;">
+            <div style="font-size:9.5px;color:rgba(242,240,230,0.55);margin-bottom:6px;" id="batchListSummary"></div>
+            <div id="batchList" style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;"></div>
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+              <button type="button" id="batchSelectAllBtn" class="align-btn" style="flex:1;">Select all</button>
+              <button type="button" id="batchSelectNoneBtn" class="align-btn" style="flex:1;">None</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:9.5px;">
+              <span>Range</span>
+              <input type="number" id="batchRangeFrom" min="1" style="width:48px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
+              <span>to</span>
+              <input type="number" id="batchRangeTo" min="1" style="width:48px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
+              <button type="button" id="batchRangeApplyBtn" class="align-btn" style="flex:1;">Select range</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:9.5px;">
+              <span>Voice-over speed</span>
+              <input type="number" id="batchSpeedInput" value="1.12" step="0.01" min="0.5" max="2" style="width:60px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
+              <span>Tabs</span>
+              <input type="number" id="batchConcurrencyInput" value="3" min="1" max="6" style="width:44px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
+            </div>
+            <button type="button" id="batchGenerateBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;">Generate videos</button>
+          </div>
+        </div>
+      </div>
 
       <label for="fileInput" class="drop" id="dropZone">
         <input type="file" id="fileInput" accept="image/*" multiple>
@@ -1917,8 +1970,12 @@
     voiceSpeedVal.textContent = (+voiceSpeedRange.value).toFixed(2) + 'x';
   });
 
-  voiceSpeedApplyBtn.addEventListener('click', async ()=>{
-    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return; }
+  async function performApplyVoiceSpeed(explicitSpeed){
+    if(explicitSpeed != null){
+      voiceSpeedRange.value = explicitSpeed;
+      voiceSpeedVal.textContent = (+explicitSpeed).toFixed(2) + 'x';
+    }
+    if(!originalAudioFile){ voiceSpeedStatus.style.color = '#e0866a'; voiceSpeedStatus.textContent = 'Add an MP3 first.'; return { ok:false, message:'Add an MP3 first.' }; }
     const speed = +voiceSpeedRange.value || 1;
     voiceSpeedApplyBtn.disabled = true;
     voiceSpeedStatus.style.color = '';
@@ -1945,14 +2002,17 @@
       voiceSpeedStatus.style.color = '#8fd19e';
       voiceSpeedStatus.textContent = `Done — voice-over is now ${speed.toFixed(2)}x speed, pitch unchanged.`;
       await saveTemplateToStorage();
+      return { ok:true, speed };
     } catch(err){
       console.error(err);
       voiceSpeedStatus.style.color = '#e0866a';
       voiceSpeedStatus.textContent = err.message || 'Speed change failed.';
+      return { ok:false, message: err.message || 'Speed change failed.' };
     } finally {
       voiceSpeedApplyBtn.disabled = false;
     }
-  });
+  }
+  voiceSpeedApplyBtn.addEventListener('click', ()=>performApplyVoiceSpeed());
 
   voiceSpeedResetBtn.addEventListener('click', async ()=>{
     if(!originalAudioFile) return;
@@ -2046,12 +2106,12 @@
     return matchedIdxs;
   }
 
-  syncVoiceBtn.addEventListener('click', async ()=>{
+  async function performVoiceSync(){
     const apiKey = groqKeyInput.value.trim();
-    if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return; }
-    if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return; }
+    if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return { ok:false, message:'Add your Groq API key first.' }; }
+    if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return { ok:false, message:'Add an MP3 first.' }; }
     const capTokensList = captions.map(c => (c||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean));
-    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return; }
+    if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return { ok:false, message:'Fill in the captions first.' }; }
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
@@ -2175,14 +2235,17 @@
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched?'var(--green-bright)':'#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched?'':' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
+      syncVoiceBtn.disabled = false;
+      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length };
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
       syncStatus.textContent = err.message || 'Sync failed.';
-    } finally {
       syncVoiceBtn.disabled = false;
+      return { ok:false, message: err.message || 'Sync failed.' };
     }
-  });
+  }
+  syncVoiceBtn.addEventListener('click', performVoiceSync);
 
   alignRow.querySelectorAll('.align-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -2499,6 +2562,7 @@
   }
 
   function applyManifest(items, imageFiles, root){
+    return new Promise((resolveApply)=>{
     // A manifest upload replaces the whole batch, not just the slots it
     // touches — otherwise old images/captions from a previous session
     // linger in the untouched slots.
@@ -2547,6 +2611,8 @@
     let slot = images.findIndex(x=>!x);
     let loaded = 0, missing = 0, pending = items.length;
 
+    if(pending === 0){ finish(); return; }
+
     items.forEach(item=>{
       if(slot === -1 || slot >= N){ pending--; if(pending===0) finish(); return; }
       const f = resolveFile(item.file);
@@ -2574,7 +2640,9 @@
       const extras = [hookItem?'hook':null, cardItem?'card':null].filter(Boolean).join(' + ');
       setManifestStatus(loaded + ' image' + (loaded===1?'':'s') + ' + caption' + (loaded===1?'':'s') + ' loaded' + (extras?' (auto-filled '+extras+')':'') + (missing ? ', ' + missing + ' not matched' : '') + '.', missing === 0);
       computeAutoCardColor();
+      resolveApply({loaded, missing});
     }
+    });
   }
   ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
   ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
@@ -2595,7 +2663,7 @@
     findMatchStatus.textContent = msg;
   }
 
-  findMatchBtn.addEventListener('click', async ()=>{
+  async function performFindMatchMp3(){
     findMatchBtn.disabled = true;
     findMatchResult.style.display = 'none';
     setFindMatchStatus('Starting…', true);
@@ -2605,7 +2673,7 @@
     if(!capsForMatch.some(c=>c && c.trim())){
       setFindMatchStatus('Add captions first — nothing to match against yet.', false);
       findMatchBtn.disabled = false;
-      return;
+      return { status:'error', message:'No captions to match against yet.' };
     }
 
     setFindMatchStatus('Finding the closest voice-over…', true);
@@ -2615,7 +2683,7 @@
     if(!voiceovers.length){
       setFindMatchStatus('No transcribed MP3s yet — add & transcribe some in the Voice-over library first.', false);
       findMatchBtn.disabled = false;
-      return;
+      return { status:'none', message:'No transcribed MP3s in the library yet.' };
     }
 
     let best = null;
@@ -2624,25 +2692,31 @@
       if(!best || confidence > best.confidence) best = { vo, confidence };
     }
 
+    let result;
     if(best && best.confidence >= FIND_MATCH_AUTO_THRESHOLD){
       await assignVoiceoverToVideo(best.vo.id, CURRENT_EDITOR_KEY);
       setFindMatchStatus(`Found it — "${best.vo.name}" (${Math.round(best.confidence*100)}% match) — applied.`, true);
       findMatchResult.style.display = 'block';
       findMatchResult.innerHTML = `Wrong MP3? Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> and pick a different one from the dropdown — takes one click.`;
+      result = { status:'applied', confidence: best.confidence, name: best.vo.name };
     } else if(best && best.confidence > 0){
       setFindMatchStatus(`Best guess: "${best.vo.name}" (${Math.round(best.confidence*100)}%) — below 80%, not auto-applied.`, false);
       findMatchResult.style.display = 'block';
       findMatchResult.innerHTML = `Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> to review it or assign a different MP3 manually.`;
+      result = { status:'guess', confidence: best.confidence, name: best.vo.name };
     } else {
       setFindMatchStatus('No matching voice-over found among the transcribed MP3s.', false);
       findMatchResult.style.display = 'block';
       findMatchResult.innerHTML = `Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> to assign one manually.`;
+      result = { status:'none' };
     }
     const link = document.getElementById('findMatchReplaceLink');
     if(link) link.addEventListener('click', e=>{ e.preventDefault(); openVoiceLibBtn.click(); });
 
     findMatchBtn.disabled = false;
-  });
+    return result;
+  }
+  findMatchBtn.addEventListener('click', performFindMatchMp3);
 
   function renderTray(){
     tray.innerHTML = '';
@@ -2784,7 +2858,7 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 4;
+  const IDB_VERSION = 5;
   // ---------- schema note ----------
   // v3 stored the blob (mp4/mp3) INSIDE the same record as its metadata (name, date,
   // transcript, template…). Every list screen — gallery, voice-over library, music
@@ -2823,6 +2897,11 @@
         if(!db.objectStoreNames.contains('voiceoverBlobs')) db.createObjectStore('voiceoverBlobs', { keyPath:'id' });
         if(!db.objectStoreNames.contains('musicBlobs')) db.createObjectStore('musicBlobs', { keyPath:'id' });
         if(!db.objectStoreNames.contains('videoTemplates')) db.createObjectStore('videoTemplates', { keyPath:'id' });
+        // v5: bulk pack-batch processing (multiple packs uploaded together, worked
+        // through by 3 concurrent internal editor tabs). Each record is one pack:
+        // its manifest root/items plus the actual image Files, so a batch survives
+        // a launcher-tab reload without re-uploading anything.
+        if(!db.objectStoreNames.contains('batchPacks')) db.createObjectStore('batchPacks', { keyPath:'id', autoIncrement:true });
         if(ev.oldVersion > 0 && ev.oldVersion < 4){
           // migrate: pull the inline blob out of each existing record, into its new
           // sibling store, leaving lightweight metadata behind in the original store.
@@ -5045,8 +5124,11 @@
   }
 
   // ---------- export ----------
-  genBtn.addEventListener('click', async ()=>{
-    if(loadedCount()<N) return;
+  let currentPackFilename = null; // set by batch autopilot before export, so downloads are named per-pack instead of always "hook-showcase.mp4"
+  async function performExportAndDownload(opts){
+    opts = opts || {};
+    const autoDownload = !!opts.autoDownload;
+    if(loadedCount()<N) return { ok:false, message:'Not all image/caption slots are filled yet.' };
     stopPreview();
     // If a music-track switch is still resolving (id lookup + duration probe),
     // wait for it — otherwise export can grab the previous track's blob.
@@ -5072,7 +5154,7 @@
     const fps = 30;
     const setPct = pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; };
 
-    let finalBlob = null, filename = 'hook-showcase.mp4';
+    let finalBlob = null, filename = currentPackFilename || 'hook-showcase.mp4';
     try{
       if(webCodecsSupported()){
         finalBlob = await encodeWithWebCodecs(dur, fps, setPct);
@@ -5089,7 +5171,7 @@
       genBtn.disabled = false;
       genBtn.textContent = 'Generate video';
       drawPreviewFrame(0);
-      return;
+      return { ok:false, message: (err && err.message) || 'Export failed.' };
     }
 
     // LEAK FIX: every previous export's blob URL (and the full mp4 ArrayBuffer/Blob it
@@ -5114,7 +5196,16 @@
       console.error('saving to gallery failed', err);
       showTmplStatus('Video downloaded but could not save to gallery.', true);
     }
-  });
+
+    if(autoDownload){
+      // Programmatically trigger the same download the user would get by
+      // clicking "Download .mp4" — safe here because it's still inside the
+      // call chain kicked off by the user's own "Reviewed — Good to Go" click.
+      dlLink.click();
+    }
+    return { ok:true, filename };
+  }
+  genBtn.addEventListener('click', ()=>performExportAndDownload());
 
   // ================= VOICE CONTROL LAYER =================
   // Architecture: voice -> LLM -> structured action(s) -> editor validates & executes
@@ -5786,9 +5877,419 @@ Reply with ONLY JSON. No prose, no markdown.`;
   // ================= END VOICE CONTROL LAYER =================
 
 
+  // ================= BULK PACK BATCH PROCESSING =================
+  // Two roles for this same file, switched by a URL param:
+  //  - normal (no ?embedded): the bulk uploader + orchestrator. Ingests many
+  //    pack folders at once, stores each in IndexedDB (batchPacks), and drives
+  //    a fixed pool of iframe "editor tabs" — each iframe IS this same file,
+  //    reloaded with ?embedded=1&slot=N — feeding them packs one at a time.
+  //  - embedded (?embedded=1): a single autopilot editor tab. On each pack it
+  //    receives, it runs the exact manual workflow (load → find MP3 → 1.12x
+  //    speed → sync) via the same functions the manual buttons call, then waits
+  //    for a human "Reviewed — Good to Go" click before rendering/downloading.
+  (function(){
+    const urlParams = new URLSearchParams(location.search);
+    const isEmbedded = urlParams.get('embedded') === '1';
+
+    function groupFilesIntoPacks(fileList){
+      const files = Array.from(fileList);
+      // Group by each file's DIRECT containing folder (not just the first path
+      // segment) — this works no matter how deep the pack folders sit under
+      // whatever folder was selected (the packs' own parent, or a folder above
+      // that, or a single pack folder directly).
+      const byDir = new Map();
+      for(const f of files){
+        const rel = f.webkitRelativePath || f.name;
+        const parts = rel.split('/');
+        const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '__root__';
+        if(!byDir.has(dir)) byDir.set(dir, []);
+        byDir.get(dir).push(f);
+      }
+      const packs = [];
+      const skipped = [];
+      for(const [dir, groupFiles] of byDir.entries()){
+        const manifestFile = groupFiles.find(f => /manifest(\s\(\d+\))?\.json$/i.test(f.name));
+        if(!manifestFile){ skipped.push(dir); continue; }
+        const imageFiles = groupFiles.filter(f => f !== manifestFile && isImageFile(f));
+        const folderName = dir === '__root__' ? (manifestFile.webkitRelativePath || manifestFile.name).split('/').slice(-2,-1)[0] || dir : dir.split('/').pop();
+        packs.push({ folderName, manifestFile, imageFiles, dir });
+      }
+      packs.sort((a,b)=>{
+        const na = (a.folderName.match(/(\d+)(?!.*\d)/)||[])[1];
+        const nb = (b.folderName.match(/(\d+)(?!.*\d)/)||[])[1];
+        if(na != null && nb != null) return (+na) - (+nb);
+        return a.folderName.localeCompare(b.folderName, undefined, {numeric:true});
+      });
+      console.debug('[batch] scanned', files.length, 'file(s) across', byDir.size, 'folder(s) —', packs.length, 'pack(s) with a manifest.json,', skipped.length, 'without.');
+      return { packs, skipped };
+    }
+
+    async function readManifestJson(file){
+      return JSON.parse(await file.text());
+    }
+
+    // ---------- normal mode: bulk uploader + orchestrator ----------
+    if(!isEmbedded){
+      const batchPanelToggle = document.getElementById('batchPanelToggle');
+      const batchPanelBody = document.getElementById('batchPanelBody');
+      const batchPanelCaret = document.getElementById('batchPanelCaret');
+      batchPanelToggle.addEventListener('click', ()=>{
+        const open = batchPanelBody.style.display !== 'none';
+        batchPanelBody.style.display = open ? 'none' : 'block';
+        batchPanelCaret.textContent = open ? '▾' : '▴';
+      });
+
+      const batchFolderBtn = document.getElementById('batchFolderBtn');
+      const batchFolderInput = document.getElementById('batchFolderInput');
+      const batchIngestStatus = document.getElementById('batchIngestStatus');
+      const batchResumeBox = document.getElementById('batchResumeBox');
+      const batchResumeText = document.getElementById('batchResumeText');
+      const batchResumeBtn = document.getElementById('batchResumeBtn');
+      const batchClearBtn = document.getElementById('batchClearBtn');
+      const batchListWrap = document.getElementById('batchListWrap');
+      const batchListSummary = document.getElementById('batchListSummary');
+      const batchList = document.getElementById('batchList');
+      const batchSelectAllBtn = document.getElementById('batchSelectAllBtn');
+      const batchSelectNoneBtn = document.getElementById('batchSelectNoneBtn');
+      const batchRangeFrom = document.getElementById('batchRangeFrom');
+      const batchRangeTo = document.getElementById('batchRangeTo');
+      const batchRangeApplyBtn = document.getElementById('batchRangeApplyBtn');
+      const batchSpeedInput = document.getElementById('batchSpeedInput');
+      const batchConcurrencyInput = document.getElementById('batchConcurrencyInput');
+      const batchGenerateBtn = document.getElementById('batchGenerateBtn');
+      const batchRunnerOverlay = document.getElementById('batchRunnerOverlay');
+      const batchRunnerCloseBtn = document.getElementById('batchRunnerCloseBtn');
+      const batchRunnerTitle = document.getElementById('batchRunnerTitle');
+      const batchRunnerSummary = document.getElementById('batchRunnerSummary');
+      const batchRunnerSlots = document.getElementById('batchRunnerSlots');
+
+      let currentBatchId = localStorage.getItem('activeBatchId') || null;
+      let currentPacks = [];
+
+      function setIngestStatus(msg, ok){
+        batchIngestStatus.style.color = ok ? 'var(--green-bright)' : '#e0866a';
+        batchIngestStatus.textContent = msg;
+      }
+
+      batchFolderBtn.addEventListener('click', ()=> batchFolderInput.click());
+      batchFolderInput.addEventListener('change', async (e)=>{
+        const files = e.target.files;
+        batchFolderInput.value = '';
+        console.debug('[batch] folder picked, files:', files ? files.length : 0);
+        if(!files || !files.length){
+          setIngestStatus('No files were returned for that folder — reselect and make sure the folder actually contains the pack subfolders (with manifest.json + images inside).', false);
+          return;
+        }
+        setIngestStatus(`Reading ${files.length} file(s)…`, true);
+        const { packs, skipped } = groupFilesIntoPacks(files);
+        if(!packs.length){
+          setIngestStatus(`Scanned ${files.length} file(s) in ${skipped.length} folder(s) — none contained a manifest.json. Select the folder that directly holds (or contains subfolders that directly hold) each pack's manifest.json + images.`, false);
+          return;
+        }
+
+        currentBatchId = 'batch_' + Date.now();
+        localStorage.setItem('activeBatchId', currentBatchId);
+        currentPacks = [];
+
+        let order = 0;
+        const badManifests = [];
+        for(const p of packs){
+          order++;
+          let root;
+          try{ root = await readManifestJson(p.manifestFile); }
+          catch(err){ badManifests.push(p.folderName); continue; }
+          const items = Array.isArray(root) ? root : (Array.isArray(root.items) ? root.items : []);
+          const record = {
+            batchId: currentBatchId, order, folderName: p.folderName,
+            root: Array.isArray(root) ? {} : root, items, imageFiles: p.imageFiles,
+            status: 'queued', error: null, slot: null
+          };
+          const id = await idbPut('batchPacks', record);
+          record.id = id; record.selected = true;
+          currentPacks.push(record);
+        }
+
+        const allSkipped = skipped.concat(badManifests);
+        setIngestStatus(`Loaded ${currentPacks.length} pack${currentPacks.length===1?'':'s'}${allSkipped.length ? `, skipped ${allSkipped.length}: ${allSkipped.slice(0,5).join(', ')}${allSkipped.length>5?'…':''}` : ''}.`, true);
+        renderBatchList();
+      });
+
+      async function checkForResumableBatch(){
+        const all = await idbGetAll('batchPacks');
+        const unfinished = all.filter(p => p.status !== 'done');
+        if(!unfinished.length) return;
+        const byBatch = new Map();
+        for(const p of unfinished){ if(!byBatch.has(p.batchId)) byBatch.set(p.batchId, []); byBatch.get(p.batchId).push(p); }
+        const sortedBatches = [...byBatch.entries()].sort((a,b)=>b[1].length-a[1].length);
+        const [batchId, packs] = sortedBatches[0];
+        batchResumeBox.style.display = 'block';
+        batchResumeText.textContent = `Found an unfinished batch — ${packs.length} pack(s) not yet done.`;
+        batchResumeBtn.onclick = async ()=>{
+          currentBatchId = batchId;
+          localStorage.setItem('activeBatchId', currentBatchId);
+          currentPacks = (await idbGetAll('batchPacks')).filter(p=>p.batchId===batchId).sort((a,b)=>a.order-b.order);
+          currentPacks.forEach(p=>{ p.selected = p.status !== 'done'; });
+          batchResumeBox.style.display = 'none';
+          renderBatchList();
+        };
+        batchClearBtn.onclick = async ()=>{
+          for(const p of unfinished) await idbDelete('batchPacks', p.id);
+          batchResumeBox.style.display = 'none';
+          setIngestStatus('Old batch cleared.', true);
+        };
+      }
+      checkForResumableBatch();
+
+      function renderBatchList(){
+        batchListWrap.style.display = currentPacks.length ? 'block' : 'none';
+        batchListSummary.textContent = `${currentPacks.length} pack(s) — ${currentPacks.filter(p=>p.selected).length} selected`;
+        batchList.innerHTML = '';
+        const statusColors = { queued:'rgba(242,240,230,0.5)', assigned:'#0a84ff', processing:'#ffd60a', ready_for_review:'#8fd19e', rendering:'#ff9500', done:'var(--green-bright)', error:'#e0574a' };
+        currentPacks.forEach(p=>{
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--line);font-size:10px;';
+          const color = statusColors[p.status] || 'rgba(242,240,230,0.5)';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.checked = !!p.selected;
+          cb.addEventListener('change', ()=>{ p.selected = cb.checked; renderBatchList(); });
+          const label = document.createElement('span');
+          label.style.flex = '1';
+          label.textContent = `#${p.order} — ${p.folderName}`;
+          const status = document.createElement('span');
+          status.style.color = color;
+          status.textContent = p.status + (p.error ? ' (' + p.error + ')' : '');
+          row.appendChild(cb); row.appendChild(label); row.appendChild(status);
+          batchList.appendChild(row);
+        });
+      }
+
+      batchSelectAllBtn.addEventListener('click', ()=>{ currentPacks.forEach(p=>p.selected=true); renderBatchList(); });
+      batchSelectNoneBtn.addEventListener('click', ()=>{ currentPacks.forEach(p=>p.selected=false); renderBatchList(); });
+      batchRangeApplyBtn.addEventListener('click', ()=>{
+        const from = +batchRangeFrom.value || 1;
+        const to = +batchRangeTo.value || currentPacks.length;
+        currentPacks.forEach((p,i)=>{ p.selected = (i+1) >= from && (i+1) <= to; });
+        renderBatchList();
+      });
+
+      let activeRun = null;
+
+      batchGenerateBtn.addEventListener('click', ()=>{
+        const selected = currentPacks.filter(p=>p.selected && p.status !== 'done');
+        if(!selected.length){ setIngestStatus('Select at least one pack that is not already done.', false); return; }
+        const speed = +batchSpeedInput.value || 1.12;
+        const concurrency = Math.max(1, Math.min(6, +batchConcurrencyInput.value || 3));
+        startBatchRun(selected.map(p=>p.id), speed, concurrency);
+      });
+
+      function baseUrl(){ return location.origin + location.pathname; }
+
+      function startBatchRun(packIds, speed, concurrency){
+        const queue = packIds.slice();
+        activeRun = { queue, slots: [], concurrency, doneCount:0, errorCount:0, total: queue.length, speed };
+
+        batchRunnerOverlay.style.display = 'flex';
+        batchRunnerTitle.textContent = `Batch run — ${activeRun.total} pack(s), ${concurrency} tab(s)`;
+        batchRunnerSlots.innerHTML = '';
+        updateRunnerSummary();
+
+        for(let i=0;i<concurrency;i++){
+          const wrap = document.createElement('div');
+          wrap.style.cssText = 'border:1px solid var(--line);border-radius:6px;overflow:hidden;display:flex;flex-direction:column;height:70vh;';
+          const header = document.createElement('div');
+          header.style.cssText = 'padding:6px 8px;background:#0e120f;font-size:10px;display:flex;justify-content:space-between;';
+          header.innerHTML = `<span>Tab ${i+1}</span><span class="slot-status">idle</span>`;
+          const iframe = document.createElement('iframe');
+          iframe.style.cssText = 'flex:1;border:none;background:#000;';
+          wrap.appendChild(header); wrap.appendChild(iframe);
+          batchRunnerSlots.appendChild(wrap);
+          const slot = { index:i, statusEl: header.querySelector('.slot-status'), iframe, packId:null };
+          activeRun.slots.push(slot);
+          iframe.src = baseUrl() + `?embedded=1&slot=${i}`;
+        }
+      }
+
+      function updateRunnerSummary(){
+        if(!activeRun) return;
+        batchRunnerSummary.textContent = `${activeRun.doneCount} done, ${activeRun.errorCount} error(s), ${activeRun.queue.length} waiting, ${activeRun.total} total.`;
+      }
+
+      async function assignNextPack(slot){
+        if(!activeRun) return;
+        if(!activeRun.queue.length){
+          slot.statusEl.textContent = 'idle — no more packs for this tab';
+          slot.packId = null;
+          checkBatchComplete();
+          return;
+        }
+        const packId = activeRun.queue.shift();
+        const rec = await idbGet('batchPacks', packId);
+        if(!rec){ assignNextPack(slot); return; }
+        rec.status = 'assigned'; rec.slot = slot.index;
+        await idbPut('batchPacks', rec);
+        const pIdx = currentPacks.findIndex(p=>p.id===packId);
+        if(pIdx>=0){ currentPacks[pIdx].status='assigned'; renderBatchList(); }
+        slot.packId = packId;
+        slot.statusEl.textContent = `loading pack #${rec.order} — ${rec.folderName}`;
+        slot.iframe.contentWindow.postMessage({
+          type: 'AUTOPILOT_LOAD_PACK',
+          pack: { id: rec.id, order: rec.order, folderName: rec.folderName, root: rec.root, items: rec.items, imageFiles: rec.imageFiles, speed: activeRun.speed }
+        }, '*');
+      }
+
+      function checkBatchComplete(){
+        if(!activeRun) return;
+        const stillWorking = activeRun.slots.some(s=>s.packId != null);
+        if(!activeRun.queue.length && !stillWorking){
+          batchRunnerTitle.textContent = `Batch run — complete (${activeRun.doneCount} done, ${activeRun.errorCount} error(s))`;
+        }
+      }
+
+      window.addEventListener('message', async (ev)=>{
+        const data = ev.data;
+        if(!data || typeof data !== 'object' || !activeRun) return;
+        const slot = activeRun.slots.find(s=>s.iframe.contentWindow === ev.source);
+        if(!slot) return;
+
+        if(data.type === 'AUTOPILOT_READY'){
+          assignNextPack(slot);
+        } else if(data.type === 'AUTOPILOT_STATUS'){
+          slot.statusEl.textContent = data.message || data.step || '';
+          if(slot.packId != null){
+            const pIdx = currentPacks.findIndex(p=>p.id===slot.packId);
+            if(pIdx>=0){
+              currentPacks[pIdx].status = data.step === 'ready_for_review' ? 'ready_for_review' : (data.step === 'rendering' ? 'rendering' : 'processing');
+              renderBatchList();
+            }
+          }
+        } else if(data.type === 'AUTOPILOT_PACK_DONE'){
+          const rec = await idbGet('batchPacks', data.packId);
+          if(rec){
+            rec.status = data.ok ? 'done' : 'error';
+            rec.error = data.ok ? null : (data.message || 'Unknown error');
+            await idbPut('batchPacks', rec);
+          }
+          const pIdx = currentPacks.findIndex(p=>p.id===data.packId);
+          if(pIdx>=0){ currentPacks[pIdx].status = data.ok ? 'done' : 'error'; currentPacks[pIdx].error = data.ok?null:data.message; }
+          if(data.ok) activeRun.doneCount++; else activeRun.errorCount++;
+          slot.packId = null;
+          updateRunnerSummary();
+          renderBatchList();
+          assignNextPack(slot);
+        }
+      });
+
+      batchRunnerCloseBtn.addEventListener('click', ()=>{ batchRunnerOverlay.style.display = 'none'; });
+    }
+
+    // ---------- embedded mode: one autopilot editor tab ----------
+    if(isEmbedded){
+      const batchPanel = document.getElementById('batchPanel');
+      if(batchPanel) batchPanel.style.display = 'none';
+
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#101210;border-bottom:1px solid var(--line);padding:8px 12px;font-family:var(--mono);font-size:11px;color:var(--paper);display:flex;justify-content:space-between;align-items:center;gap:10px;';
+      banner.innerHTML = `
+        <span id="autopilotStatusText">Waiting for a pack…</span>
+        <button type="button" id="autopilotReviewBtn" disabled style="background:#2a2a1a;color:rgba(242,240,230,0.4);border:1px solid var(--line);border-radius:4px;padding:8px 14px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:not-allowed;">Reviewed — Good to Go</button>
+      `;
+      document.body.prepend(banner);
+      document.body.style.paddingTop = '40px';
+      const statusText = banner.querySelector('#autopilotStatusText');
+      const reviewBtn = banner.querySelector('#autopilotReviewBtn');
+
+      let currentPack = null;
+
+      function setStatus(msg, step){
+        statusText.textContent = msg;
+        parent.postMessage({ type:'AUTOPILOT_STATUS', step, message: msg }, '*');
+      }
+
+      function setReviewEnabled(enabled){
+        reviewBtn.disabled = !enabled;
+        reviewBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+        reviewBtn.style.background = enabled ? 'var(--green-bright)' : '#2a2a1a';
+        reviewBtn.style.color = enabled ? '#06120b' : 'rgba(242,240,230,0.4)';
+      }
+
+      function resetEditorForNewPack(){
+        audioFile = null; originalAudioFile = null;
+        if(previewAudioUrl){ URL.revokeObjectURL(previewAudioUrl); previewAudioUrl = null; }
+        previewAudio.removeAttribute('src'); previewAudio.load();
+        audioDT.textContent = 'Add MP3'; audioDS.textContent = 'plays under the full video, muted after export finishes';
+        audioRemove.style.display = 'none';
+        whisperBox.style.display = 'none'; voiceSpeedBox.style.display = 'none';
+        voiceSpeedRange.value = 1; voiceSpeedVal.textContent = '1.00x'; voiceSpeedResetBtn.style.display = 'none';
+        voiceSpeedStatus.textContent = ''; syncStatus.textContent = ''; syncBreakdown.style.display = 'none';
+        findMatchStatus.textContent = ''; findMatchResult.style.display = 'none';
+        for(let i=0;i<N;i++) showDur[i] = 1.0;
+        setReviewEnabled(false);
+      }
+
+      async function runAutopilotForPack(pack){
+        currentPack = pack;
+        const safeName = (pack.folderName || ('pack-'+pack.order)).replace(/[^a-z0-9-_ ]/gi,'').trim().replace(/\s+/g,'-') || ('pack-'+pack.order);
+        currentPackFilename = safeName + '.mp4';
+        resetEditorForNewPack();
+
+        try{
+          setStatus(`Pack #${pack.order} — loading images + captions…`, 'loading');
+          await applyManifest(pack.items, pack.imageFiles, pack.root);
+
+          setStatus(`Pack #${pack.order} — finding matching MP3…`, 'processing');
+          const matchResult = await performFindMatchMp3();
+          if(matchResult.status !== 'applied'){
+            setStatus(`Pack #${pack.order} — no confident MP3 match (${matchResult.status}). Assign one manually, run speed + sync, then review.`, 'processing');
+          } else {
+            setStatus(`Pack #${pack.order} — setting voice-over speed to ${pack.speed}x…`, 'processing');
+            const speedResult = await performApplyVoiceSpeed(pack.speed);
+            if(!speedResult.ok){
+              setStatus(`Pack #${pack.order} — speed step failed: ${speedResult.message}. Fix manually, then sync + review.`, 'processing');
+            } else {
+              setStatus(`Pack #${pack.order} — syncing captions to voice-over…`, 'processing');
+              const syncResult = await performVoiceSync();
+              if(!syncResult.ok){
+                setStatus(`Pack #${pack.order} — sync failed: ${syncResult.message}. Fix manually, then review.`, 'processing');
+              } else {
+                setStatus(`Pack #${pack.order} — ready. Review the video, then click "Reviewed — Good to Go".`, 'ready_for_review');
+              }
+            }
+          }
+        } catch(err){
+          console.error(err);
+          setStatus(`Pack #${pack.order} — automation error: ${(err&&err.message)||err}. Fix manually, then review.`, 'processing');
+        }
+        setReviewEnabled(true);
+      }
+
+      reviewBtn.addEventListener('click', async ()=>{
+        if(!currentPack) return;
+        setReviewEnabled(false);
+        const packRef = currentPack;
+        setStatus(`Pack #${packRef.order} — rendering & downloading…`, 'rendering');
+        const result = await performExportAndDownload({ autoDownload:true });
+        if(result && result.ok){
+          setStatus(`Pack #${packRef.order} — done, downloaded. Waiting for next pack…`, 'done');
+          parent.postMessage({ type:'AUTOPILOT_PACK_DONE', packId: packRef.id, ok:true, filename: result.filename }, '*');
+          currentPack = null;
+        } else {
+          setStatus(`Pack #${packRef.order} — render failed: ${(result&&result.message)||'unknown error'}. Fix and click Reviewed again.`, 'processing');
+          setReviewEnabled(true);
+        }
+      });
+
+      window.addEventListener('message', (ev)=>{
+        const data = ev.data;
+        if(!data || typeof data !== 'object') return;
+        if(data.type === 'AUTOPILOT_LOAD_PACK') runAutopilotForPack(data.pack);
+      });
+
+      parent.postMessage({ type:'AUTOPILOT_READY' }, '*');
+    }
+  })();
+
   refreshAll();
 })();
 </script>
 </body>
 </html>
-.
