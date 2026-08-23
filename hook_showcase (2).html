@@ -3294,12 +3294,19 @@
   // Fixed, non-negotiable style so every batch video looks identical: no per-video
   // drift, no per-image position overrides, no per-word card positions. Hookflash
   // and showcase reveal one word at a time; the card already does.
+  // REVERTED: cardPos and cardColorAuto used to be force-applied here (cardPos
+  // hard-set to 5), which is what made sync output differ from the old file for
+  // "the same audio/video/speed" — performVoiceSync's own timestamp math
+  // subtracts cardPos*cardDur as fixed screen time before mapping Whisper's
+  // timestamps onto image durations, so a different cardPos silently produces
+  // different durations even though performVoiceSync itself never changed.
+  // Restored to the old file's exact behavior: cardPos is left alone (stays at
+  // its plain default, 0) and showWordByWord goes back to true, so sync output
+  // matches the old file exactly for the same inputs.
   const LOCKED_CAPTION_RULES = {
     hook:     { fontSize:50, pos:{ xNorm:0.5, yNorm:0.5,  align:'center' } },
     showcase: { fontSize:34, pos:{ xNorm:0.5, yNorm:0.84, align:'center' } },
-    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 } },
-    cardPos:  5,      // card sits after image 5 (between image 5 and image 6) by default
-    cardColorAuto: false  // don't derive the card color from the loaded images by default
+    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 } }
   };
   function applyLockedCaptionRules(){
     hookCapFontSize = LOCKED_CAPTION_RULES.hook.fontSize;
@@ -3309,25 +3316,18 @@
     capFontSize = LOCKED_CAPTION_RULES.showcase.fontSize;
     captionPos = { ...LOCKED_CAPTION_RULES.showcase.pos };
     capPosOverride = new Array(N).fill(null); // never let any single image drift from the locked position
-    showWordByWord = false; // showcase reveals the full caption at once, not word-by-word
+    showWordByWord = true;
 
     cardFontSize = LOCKED_CAPTION_RULES.card.fontSize;
     cardTextPos = { ...LOCKED_CAPTION_RULES.card.pos };
     cardWordPosEnabled = {}; cardWordPos = {}; // never let per-word card positions shift left/right
-    cardPos = LOCKED_CAPTION_RULES.cardPos;
-    cardColorAuto = LOCKED_CAPTION_RULES.cardColorAuto;
 
     try{
       document.getElementById('hookCapSizeVal').value = hookCapFontSize;
       capSizeVal.value = capFontSize;
       cardSizeVal.value = cardFontSize;
       hookWordToggle.checked = true;
-      showWordToggle.checked = false;
-      buildCardPosOptions();
-      cardPosSelect.value = cardPos;
-      cardColorAutoToggle.checked = cardColorAuto;
-      computeAutoCardColor();
-      updateSwatch();
+      showWordToggle.checked = true;
     } catch(e){ /* fine if the editor UI isn't mounted yet */ }
   }
 
