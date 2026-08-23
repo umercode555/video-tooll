@@ -3297,7 +3297,9 @@
   const LOCKED_CAPTION_RULES = {
     hook:     { fontSize:50, pos:{ xNorm:0.5, yNorm:0.5,  align:'center' } },
     showcase: { fontSize:34, pos:{ xNorm:0.5, yNorm:0.84, align:'center' } },
-    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 } }
+    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 } },
+    cardPos:  5,      // card sits after image 5 (between image 5 and image 6) by default
+    cardColorAuto: false  // don't derive the card color from the loaded images by default
   };
   function applyLockedCaptionRules(){
     hookCapFontSize = LOCKED_CAPTION_RULES.hook.fontSize;
@@ -3312,6 +3314,8 @@
     cardFontSize = LOCKED_CAPTION_RULES.card.fontSize;
     cardTextPos = { ...LOCKED_CAPTION_RULES.card.pos };
     cardWordPosEnabled = {}; cardWordPos = {}; // never let per-word card positions shift left/right
+    cardPos = LOCKED_CAPTION_RULES.cardPos;
+    cardColorAuto = LOCKED_CAPTION_RULES.cardColorAuto;
 
     try{
       document.getElementById('hookCapSizeVal').value = hookCapFontSize;
@@ -3319,6 +3323,11 @@
       cardSizeVal.value = cardFontSize;
       hookWordToggle.checked = true;
       showWordToggle.checked = false;
+      buildCardPosOptions();
+      cardPosSelect.value = cardPos;
+      cardColorAutoToggle.checked = cardColorAuto;
+      computeAutoCardColor();
+      updateSwatch();
     } catch(e){ /* fine if the editor UI isn't mounted yet */ }
   }
 
@@ -3338,6 +3347,13 @@
 
   async function saveTemplateToStorage(){
     try{
+      // BUG FIX: 'current' is ONE shared key across every tab/iframe. Headless
+      // prep (many packs, sequential) and every open review tab all called this,
+      // so whichever pack last wrote here won — and autoRestoreTemplate() below
+      // would then load that random other pack's audio/images/captions on top
+      // of the correct per-pack template. Embedded pages persist per-pack via
+      // batchPackTemplates instead, so never touch the shared key.
+      if(new URLSearchParams(location.search).get('embedded') === '1') return true;
       await idbPut('templates', await collectTemplate(), TEMPLATE_KEY);
       return true;
     } catch(err){ console.error('template save failed', err); return false; }
@@ -3491,6 +3507,13 @@
   // auto-restore on open, if this exact file/origin has a saved template
   (async function autoRestoreTemplate(){
     try{
+      // BUG FIX: this used to run unconditionally, racing loadForReview()'s
+      // per-pack applyTemplate() in embedded review pages (and the headless
+      // prep page). Whichever finished last won, so this silently clobbered
+      // the correct pack's audio/images/captions with stale data from
+      // whatever pack last wrote the shared 'current' key. Never run it in
+      // embedded (prep/review) pages — they load their own template.
+      if(new URLSearchParams(location.search).get('embedded') === '1') return;
       const t = await idbGet('templates', TEMPLATE_KEY);
       if(!t) return;
       showTmplStatus('Restoring your last project…');
@@ -6701,7 +6724,7 @@ window.addEventListener('message', async (ev)=>{
             // "Found it — ..." line the manual button shows — previously this
             // only ever appeared on the hidden headless iframe's own DOM,
             // which nobody ever sees, so it looked like matching never ran.
-            matchInfo = { name: matchResult.name, confidence: matchResult.confidence };
+            matchInfo = { name: matchResult.name, confidence: matchResult.confidence, speed };
             const speedResult = await performApplyVoiceSpeed(speed);
             if(!speedResult.ok){
               status = 'error'; note = speedResult.message || 'Speed step failed.';
@@ -6784,6 +6807,36 @@ window.addEventListener('message', async (ev)=>{
           } else {
             await applyDefaultBackgroundMusic();
           }
+          // BUG FIX: this used to print "Found it — X — applied" purely from
+          // rec.matchInfo (saved separately on the batchPacks record) without
+          // ever checking whether the actual audio actually made it into the
+          // editor (audioFile). If the saved per-pack template came back
+          // empty/missing its audioFile for any reason, the message still
+          // claimed success while "Add MP3" sat empty and Sync had nothing to
+          // work with. Now: if matchInfo says a voice-over was applied but
+          // audioFile is NOT actually loaded, re-fetch that exact voiceover
+          // from the library by name and apply it live, right here, before
+          // saying anything succeeded.
+          let selfHealedFresh = false;
+          if(rec.matchInfo && rec.matchInfo.name && !audioFile){
+            const vos = await idbGetAll('voiceovers').catch(()=>[]);
+            const vo = vos.find(v => v.name === rec.matchInfo.name);
+            if(vo){
+              // BUG FIX: this used to stop at re-attaching the raw mp3 —
+              // assignVoiceoverToVideo resets speed to 1.0x (correct for a
+              // fresh manual pick), but here we're recovering a pack whose
+              // prep already found+sped+synced this exact audio and just
+              // failed to persist it. Leaving it at 1.0x/unsynced silently
+              // dropped both later steps. Redo them right here, using the
+              // same speed prep used (saved on matchInfo), so the recovered
+              // pack ends up in the same state prep would have produced.
+              await assignVoiceoverToVideo(vo.id, CURRENT_EDITOR_KEY);
+              const speed = rec.matchInfo.speed || 1.12;
+              const speedResult = await performApplyVoiceSpeed(speed);
+              if(speedResult.ok) await performVoiceSync();
+              selfHealedFresh = true;
+            }
+          }
           // Locked style always wins, whether or not a prepared template
           // existed and whatever it contained — this is the one point where
           // the actual editor UI is visible, so it's the last line of defense
@@ -6795,13 +6848,16 @@ window.addEventListener('message', async (ev)=>{
           // shows. The actual matching ran during headless prep (on the
           // hidden iframe's own invisible DOM), so nobody ever saw it — it
           // only looked like "Find matching MP3" was never triggered. This
-          // replays the saved result onto the real, visible status line.
-          if(rec.matchInfo && rec.matchInfo.name){
+          // replays the saved result onto the real, visible status line —
+          // but only after the self-heal above, so it's never a lie.
+          if(rec.matchInfo && rec.matchInfo.name && audioFile){
             setFindMatchStatus(`Found it — "${rec.matchInfo.name}" (${Math.round((rec.matchInfo.confidence||0)*100)}% match) — applied.`, true);
             findMatchResult.style.display = 'block';
             findMatchResult.innerHTML = `Wrong MP3? Open the <a href="#" id="findMatchReplaceLink" style="color:var(--green-bright);">Voice-over library</a> and pick a different one from the dropdown — takes one click.`;
             const link = document.getElementById('findMatchReplaceLink');
             if(link) link.addEventListener('click', e=>{ e.preventDefault(); openVoiceLibBtn.click(); });
+          } else if(rec.matchInfo && rec.matchInfo.name && !audioFile){
+            setFindMatchStatus(`Matched "${rec.matchInfo.name}" during prep, but the audio failed to load into this editor — assign it manually below.`, false);
           } else if(rec.status === 'no_match'){
             setFindMatchStatus(rec.error || 'No matching voice-over found — assign one manually.', false);
           }
