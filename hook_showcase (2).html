@@ -2147,17 +2147,52 @@
         }
       }
 
+      // pass 1.5 — single-word fallback for captions that FAILED the main match (paraphrased
+      // scripts, mis-heard brand/product names, etc). Rather than letting these fall all the way
+      // back to a pure word-count guess (the actual source of "image before/after voice" drift),
+      // search the whole remaining transcript for this caption's single most distinctive word
+      // (longest token — usually the product name) using an EXACT match only, no fuzzy tolerance,
+      // to avoid anchoring on a false positive. One correct anchor point beats a whole-caption
+      // guess. Captions still unmatched here fall through to the group-proportional estimate as
+      // before, unchanged.
+      let fallbackPointer = 0;
+      for(let i=0;i<N;i++){
+        if(matches[i]){
+          // an already-matched caption (from pass 1) moves the search cursor forward so
+          // later fallback lookups never search backward into speech that's already used
+          const endWord = words.findIndex(w => w.start === matches[i].end);
+          fallbackPointer = Math.max(fallbackPointer, endWord >= 0 ? endWord + 1 : fallbackPointer);
+          continue;
+        }
+        const toks = capTokensList[i];
+        if(!toks.length) continue;
+        const distinctive = toks.slice().sort((a,b)=>b.length-a.length)[0];
+        if(!distinctive || distinctive.length < 3) continue; // too short/generic to trust as an anchor
+        let found = -1;
+        for(let k=fallbackPointer; k<words.length; k++){
+          if(syncNormWord(words[k].word) === distinctive){ found = k; break; }
+        }
+        if(found !== -1){
+          matches[i] = { start: words[found].start, end: words[found].end, hitCount: 1, tokCount: toks.length, singleWord: true };
+          fallbackPointer = found + 1;
+        }
+      }
+
       // Reject "false positive" anchors: a real spoken caption needs a sane minimum amount of
       // audio per word (real speech, even fast, rarely drops below ~0.12s/word). If a matched
       // anchor implies less time than that for its own words, it's almost certainly a stray fuzzy
       // match landing on the wrong word — treating it as a hard boundary was what compressed every
       // caption after it down to the 0.20s floor. Demote it back to "unmatched" so pass 2 estimates
-      // it from surrounding timing instead of trusting a bad timestamp.
+      // it from surrounding timing instead of trusting a bad timestamp. Single-word fallback
+      // anchors (pass 1.5) are exempt from the token-count scaling — they only ever represent
+      // one spoken word's own duration, not the whole caption's, so the multi-word floor doesn't
+      // apply to them; a plain non-trivial word length is enough sanity check.
       const MIN_SEC_PER_WORD = 0.12;
       for(let i=0;i<N;i++){
         const m = matches[i];
         if(!m) continue;
-        if((m.end - m.start) < MIN_SEC_PER_WORD * Math.max(1, m.tokCount) * 0.5){
+        const floor = m.singleWord ? MIN_SEC_PER_WORD : MIN_SEC_PER_WORD * Math.max(1, m.tokCount) * 0.5;
+        if((m.end - m.start) < floor){
           matches[i] = null;
         }
       }
@@ -2209,7 +2244,7 @@
           const dur = Math.max(0.2, +(span * weights[k]/wSum).toFixed(2));
           newDur[i] = dur;
           const label = (captions[i]||'').trim();
-          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real });
+          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real, singleWord: i===A.idx && A.real && matches[i] && matches[i].singleWord });
         });
       }
 
@@ -2233,7 +2268,7 @@
       syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
       syncBreakdown.style.display = 'block';
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
-        `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched?'var(--green-bright)':'#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched?'':' <span style="opacity:.6;">(estimated)</span>'}</div>`
+        `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched ? (r.singleWord ? '#8fc7d1' : 'var(--green-bright)') : '#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched ? (r.singleWord ? ' <span style="opacity:.6;">(anchored on 1 word)</span>' : '') : ' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
       syncVoiceBtn.disabled = false;
       return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length };
