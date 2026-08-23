@@ -816,19 +816,6 @@
     </div>
   </div>
 
-  <!-- single full editor, opened for exactly one pack at a time (same editor the
-       "Full Gallery" flow uses) — click a grid button, review/tweak, click
-       "Reviewed — Good to Go", it renders + downloads + drops you back at the grid. -->
-  <div class="modal-overlay" id="batchReviewOverlay" style="display:none;">
-    <div class="modal" style="max-width:min(480px,98vw);width:98vw;max-height:96vh;overflow:hidden;padding:0;display:flex;flex-direction:column;">
-      <div class="modal-head" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;margin:0;">
-        <h3 style="margin:0;font-size:12px;" id="batchReviewTitle">Pack</h3>
-        <button type="button" class="modal-close" id="batchReviewCloseBtn">✕ Back to grid</button>
-      </div>
-      <iframe id="batchReviewIframe" style="flex:1;border:none;background:#000;min-height:72vh;"></iframe>
-    </div>
-  </div>
-
   <!-- headless — never shown. Runs the fixed pipeline (find mp3 → 1.12x speed →
        sync → locked captions → default music) one pack at a time in the background. -->
   <iframe id="batchPrepIframe" style="display:none;"></iframe>
@@ -2740,10 +2727,14 @@
     }
 
     let best = null;
+    const scored = [];
     for(const vo of voiceovers){
       const { confidence } = scoreTranscriptAgainstVideo(vo.transcript, capsForMatch);
+      scored.push({ name: vo.name, confidence });
       if(!best || confidence > best.confidence) best = { vo, confidence };
     }
+    scored.sort((a,b)=>b.confidence-a.confidence);
+    console.debug('[find-match] top candidates:', scored.slice(0,5).map(s=>`${s.name}: ${Math.round(s.confidence*100)}%`).join(', ') || '(none)');
 
     let result;
     if(best && best.confidence >= FIND_MATCH_AUTO_THRESHOLD){
@@ -3316,7 +3307,7 @@
     capFontSize = LOCKED_CAPTION_RULES.showcase.fontSize;
     captionPos = { ...LOCKED_CAPTION_RULES.showcase.pos };
     capPosOverride = new Array(N).fill(null); // never let any single image drift from the locked position
-    showWordByWord = true;
+    showWordByWord = false; // showcase reveals the full caption at once, not word-by-word
 
     cardFontSize = LOCKED_CAPTION_RULES.card.fontSize;
     cardTextPos = { ...LOCKED_CAPTION_RULES.card.pos };
@@ -3327,7 +3318,7 @@
       capSizeVal.value = capFontSize;
       cardSizeVal.value = cardFontSize;
       hookWordToggle.checked = true;
-      showWordToggle.checked = true;
+      showWordToggle.checked = false;
     } catch(e){ /* fine if the editor UI isn't mounted yet */ }
   }
 
@@ -6134,10 +6125,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchDownloadAllBtn = document.getElementById('batchDownloadAllBtn');
       const batchDownloadAllStatus = document.getElementById('batchDownloadAllStatus');
 
-      const batchReviewOverlay = document.getElementById('batchReviewOverlay');
-      const batchReviewCloseBtn = document.getElementById('batchReviewCloseBtn');
-      const batchReviewTitle = document.getElementById('batchReviewTitle');
-      const batchReviewIframe = document.getElementById('batchReviewIframe');
+      // (review is a full top-level page navigation now — no overlay/iframe elements to look up)
 
       const batchPrepIframe = document.getElementById('batchPrepIframe');
 
@@ -6361,7 +6349,13 @@ Reply with ONLY JSON. No prose, no markdown.`;
         // running for it anymore — put it back in the queue instead of leaving it
         // stuck and unclickable forever.
         for(const p of all){ if(p.status === 'processing'){ p.status = 'queued'; await idbPut('batchPacks', p); } }
-        if(all.length){ currentPacks = all; renderBatchSummary(); }
+        if(all.length){
+          currentPacks = all;
+          renderBatchSummary();
+          batchPanelBody.style.display = 'block';
+          batchPanelCaret.textContent = '▴';
+          openGrid(); // land straight on the grid — e.g. right after coming back from reviewing a pack
+        }
       })();
 
       function renderBatchSummary(){
@@ -6476,34 +6470,24 @@ Reply with ONLY JSON. No prose, no markdown.`;
         });
       }
 
-      // ---------- review: one fresh iframe per open, destroyed on close ----------
-      let reviewPackId = null;
+      // ---------- review: full top-level navigation to the exact same editor
+      // page (no iframe, no card/modal wrapper) — clicking a pack replaces
+      // this whole page with the real single-video editor for that pack.
+      // Everything needed to come back (batch id, pack list) lives in
+      // localStorage/IndexedDB, not in JS memory, so it survives the navigation.
       function openReview(packId){
         const p = currentPacks.find(x=>x.id===packId);
         if(!p) return;
-        reviewPackId = packId;
-        batchReviewTitle.textContent = `Pack #${p.order} — ${p.folderName}`;
-        batchReviewOverlay.style.display = 'flex';
-        batchReviewIframe.onerror = ()=>{ batchReviewTitle.textContent = `Pack #${p.order} — failed to load in this browser.`; };
-        batchReviewIframe.src = baseUrl() + `?embedded=1&mode=review&packId=${packId}&_t=${Date.now()}`;
+        localStorage.setItem('activeBatchId', currentBatchId);
+        window.location.href = baseUrl() + `?embedded=1&mode=review&packId=${packId}&_t=${Date.now()}`;
       }
-      function closeReview(){
-        batchReviewOverlay.style.display = 'none';
-        batchReviewIframe.removeAttribute('src'); // fully tear down — next open is always a clean load
-        reviewPackId = null;
-      }
-      batchReviewCloseBtn.addEventListener('click', closeReview);
 
-      window.addEventListener('message', async (ev)=>{
+window.addEventListener('message', async (ev)=>{
         const data = ev.data;
         if(!data || typeof data !== 'object') return;
-        if(data.type === 'REVIEW_PACK_DONE' && data.packId === reviewPackId){
-          const rec = await idbGet('batchPacks', data.packId).catch(()=>null);
-          if(rec){ rec.status = data.ok ? 'done' : 'error'; rec.error = data.ok ? null : data.message; await idbPut('batchPacks', rec); }
-          const idx = currentPacks.findIndex(p=>p.id===data.packId);
-          if(idx>=0){ currentPacks[idx].status = data.ok ? 'done' : 'error'; currentPacks[idx].error = data.ok ? null : data.message; }
-          renderGrid(); renderBatchSummary();
-          if(data.ok) closeReview();
+        if(data.type === 'REVIEW_PACK_DONE'){
+          // legacy path from the old iframe flow — no-op now that review is a
+          // full navigation and updates batchPacks directly before returning.
         }
       });
 
@@ -6669,6 +6653,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
         try{
           await applyDefaultBackgroundMusic();
+          applyLockedCaptionRules(); // defensive re-lock — guarantees the saved template always has the exact spec'd sizes/positions, no matter what ran above
           const template = await collectTemplate();
           await idbPut('batchPackTemplates', { id: embeddedPackId, template });
         } catch(err){
@@ -6685,13 +6670,20 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const banner = document.createElement('div');
       banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#101210;border-bottom:1px solid var(--line);padding:8px 12px;font-family:var(--mono);font-size:11px;color:var(--paper);display:flex;justify-content:space-between;align-items:center;gap:10px;';
       banner.innerHTML = `
-        <span id="reviewStatusText">Loading pack…</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <button type="button" id="reviewBackBtn" style="background:transparent;color:rgba(242,240,230,0.7);border:1px solid var(--line);border-radius:4px;padding:6px 10px;font-family:var(--mono);font-size:10px;cursor:pointer;">← Back to grid</button>
+          <span id="reviewStatusText">Loading pack…</span>
+        </span>
         <button type="button" id="reviewGoodBtn" disabled style="background:#2a2a1a;color:rgba(242,240,230,0.4);border:1px solid var(--line);border-radius:4px;padding:8px 14px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:not-allowed;">Reviewed — Good to Go</button>
       `;
       document.body.prepend(banner);
       document.body.style.paddingTop = '40px';
       const statusText = banner.querySelector('#reviewStatusText');
       const reviewBtn = banner.querySelector('#reviewGoodBtn');
+      const backBtn = banner.querySelector('#reviewBackBtn');
+
+      function backToGrid(){ window.location.href = baseUrl(); }
+      backBtn.addEventListener('click', backToGrid);
 
       function setReviewEnabled(enabled){
         reviewBtn.disabled = !enabled;
@@ -6712,9 +6704,14 @@ Reply with ONLY JSON. No prose, no markdown.`;
           if(tRec && tRec.template){
             await applyTemplate(tRec.template);
           } else {
-            applyLockedCaptionRules();
             await applyDefaultBackgroundMusic();
           }
+          // Locked style always wins, whether or not a prepared template
+          // existed and whatever it contained — this is the one point where
+          // the actual editor UI is visible, so it's the last line of defense
+          // against a stale/corrupt template silently drifting off-spec.
+          applyLockedCaptionRules();
+          drawPreviewFrame(previewT);
           statusText.textContent = `Pack #${rec.order} — ${rec.folderName}. Review the video, then click "Reviewed — Good to Go".`;
           setReviewEnabled(true);
         } catch(err){
@@ -6730,12 +6727,15 @@ Reply with ONLY JSON. No prose, no markdown.`;
         if(result && result.ok){
           try{ await idbPut('batchRenders', { id: embeddedPackId, blob: result.blob }); }
           catch(err){ console.error('caching render for ZIP failed', err); }
+          const rec = await idbGet('batchPacks', embeddedPackId).catch(()=>null);
+          if(rec){ rec.status = 'done'; rec.error = null; await idbPut('batchPacks', rec).catch(()=>{}); }
           statusText.textContent = 'Done — downloaded. Returning to the grid…';
-          parent.postMessage({ type:'REVIEW_PACK_DONE', packId: embeddedPackId, ok:true, filename: result.filename }, '*');
+          setTimeout(backToGrid, 600);
         } else {
+          const rec = await idbGet('batchPacks', embeddedPackId).catch(()=>null);
+          if(rec){ rec.status = 'error'; rec.error = (result&&result.message)||'Render failed.'; await idbPut('batchPacks', rec).catch(()=>{}); }
           statusText.textContent = `Render failed: ${(result&&result.message)||'unknown error'}. Fix and click Reviewed again.`;
           setReviewEnabled(true);
-          parent.postMessage({ type:'REVIEW_PACK_DONE', packId: embeddedPackId, ok:false, message:(result&&result.message)||'Render failed.' }, '*');
         }
       });
     }
