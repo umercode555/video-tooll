@@ -812,6 +812,7 @@
       <div id="batchGridSummary" style="font-family:var(--mono);font-size:11px;color:rgba(242,240,230,0.7);margin:8px 0 4px;"></div>
       <div id="batchGridStageLine" style="font-family:var(--mono);font-size:10px;color:var(--green-bright);margin-bottom:4px;min-height:14px;"></div>
       <div id="batchGridLegend" style="font-family:var(--mono);font-size:9px;color:rgba(242,240,230,0.5);margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap;"></div>
+      <div id="batchErrorPanel" style="display:none;font-family:var(--mono);font-size:11px;color:#e0866a;background:rgba(224,134,106,0.08);border:1px solid #e0866a;border-radius:4px;padding:8px 10px;margin-bottom:10px;"></div>
       <div id="batchDownloadAllStatus" style="display:none;font-family:var(--mono);font-size:10.5px;color:var(--green-bright);margin:0 0 10px;"></div>
       <div id="batchGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:8px;"></div>
     </div>
@@ -826,7 +827,16 @@
        output callback. Positioned off-screen with real (if tiny) opacity instead, so it's
        invisible to the person but the browser still treats it as a live, rendered frame
        and the encoder actually runs. -->
-  <iframe id="batchPrepIframe" style="position:fixed; left:-99999px; top:0; width:270px; height:480px; border:0; opacity:0.01; pointer-events:none;"></iframe>
+  <!-- Chromium stops GPU-compositing anything parked thousands of px off-screen (the old
+       left:-99999px) — it gets treated as "not visible" and falls back to a software
+       canvas/encode path, which is exactly why headless renders ran 10-20x slower than
+       the same render triggered by a visible click. Clipping a normal-position (0,0)
+       iframe through a 1x1px overflow:hidden wrapper keeps it inside Chromium's "on
+       screen" bounds — still fully invisible to the user, but GPU-accelerated like any
+       normal visible tab, so render speed matches manual editing. -->
+  <div style="position:fixed; left:0; top:0; width:1px; height:1px; overflow:hidden; opacity:0.01; pointer-events:none;">
+    <iframe id="batchPrepIframe" style="width:270px; height:480px; border:0;"></iframe>
+  </div>
 
   <div class="panel">
 
@@ -2315,14 +2325,6 @@
         });
       }
 
-      // Per your spec: caption 5 (index 4) runs 0.2s shorter than whatever the timing
-      // math above calculated for it, applied last so nothing above it interferes.
-      if(newDur.length > 4 && (captions[4]||'').trim()){
-        newDur[4] = Math.max(0.2, +(newDur[4] - 0.2).toFixed(2));
-        const r5 = rows.find(r => r.i === 4);
-        if(r5) r5.dur = newDur[4];
-      }
-
 
       // Safety net: the mp3 is the master timeline — the image/caption timeline must never end
       // before the audio does. If rounding or a fully-unmatched tail still leaves the visual
@@ -2346,7 +2348,7 @@
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched ? (r.singleWord ? '#8fc7d1' : 'var(--green-bright)') : '#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched ? (r.singleWord ? ' <span style="opacity:.6;">(anchored on 1 word)</span>' : '') : ' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
       syncVoiceBtn.disabled = false;
-      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length };
+      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length, clampedGaps, missed };
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
@@ -3368,7 +3370,7 @@
   const LOCKED_CAPTION_RULES = {
     hook:     { fontSize:50, pos:{ xNorm:0.5, yNorm:0.5,  align:'center' } },
     showcase: { fontSize:34, pos:{ xNorm:0.5, yNorm:0.84, align:'center' } },
-    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 }, pos_index:5, duration:2.00 } // between image 5 and 6, 2.00s
+    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 }, pos_index:5, duration:2.10 } // between image 5 and 6, 2.10s
   };
   function applyLockedCaptionRules(){
     hookCapFontSize = LOCKED_CAPTION_RULES.hook.fontSize;
@@ -3394,9 +3396,13 @@
     cardPos = LOCKED_CAPTION_RULES.card.pos_index;
     cardDur = LOCKED_CAPTION_RULES.card.duration;
 
-    // Card color: plain white, not derived from the loaded images.
+    // Card color: plain white background, not derived from the loaded images.
     cardColorAuto = false;
     cardColorManual = '#ffffff';
+    // Word color must always be black on that white background — this was never
+    // locked, so whatever cardTextColor a template/session last had (often the
+    // white default) rode straight through into every auto-prepared video.
+    cardTextColor = '#000000';
 
     try{
       document.getElementById('hookCapSizeVal').value = hookCapFontSize;
@@ -3408,6 +3414,7 @@
       cardDurNum.value = cardDur.toFixed(2);
       cardPosSelect.value = cardPos;
       cardColorAutoToggle.checked = cardColorAuto;
+      cardTextColorSwatch.style.background = cardTextColor;
     } catch(e){ /* fine if the editor UI isn't mounted yet */ }
   }
 
@@ -5109,8 +5116,21 @@
       if(document.querySelector(`script[data-src="${src}"]`)){ resolve(); return; }
       const s = document.createElement('script');
       s.src = src; s.dataset.src = src;
-      s.onload = ()=>resolve();
-      s.onerror = ()=>reject(new Error('failed to load '+src));
+      let settled = false;
+      // A blocked/slow CDN (ad-blocker, firewall, DNS hiccup) leaves this <script>
+      // tag pending forever with neither onload nor onerror ever firing — which
+      // is exactly what read as the pipeline being permanently "stuck" at the
+      // render step with no error shown. 12s is generous for a same-origin cached
+      // hit or a normal CDN fetch; past that, fail fast so the caller can retry
+      // the other CDN or surface a real error instead of hanging silently.
+      const timer = setTimeout(()=>{
+        if(settled) return;
+        settled = true;
+        s.remove();
+        reject(new Error('Timed out loading ' + src + ' (12s) — check your network/ad-blocker.'));
+      }, 12000);
+      s.onload = ()=>{ if(settled) return; settled = true; clearTimeout(timer); resolve(); };
+      s.onerror = ()=>{ if(settled) return; settled = true; clearTimeout(timer); reject(new Error('failed to load '+src)); };
       document.head.appendChild(s);
     });
   }
@@ -5190,6 +5210,9 @@
 
     const frameDurationUs = Math.round(1_000_000 / fps);
     for(let i=0;i<totalFrames;i++){
+      if(videoEncoder.state === 'closed'){
+        throw new Error('Video encoder closed unexpectedly (encoder/driver error) — try again; if it keeps happening, this browser/GPU may not support this codec.');
+      }
       const t = Math.min(dur - 0.0001, i / fps);
       previewT = t;
       renderAt(t);
@@ -5377,7 +5400,7 @@
 
     const dur = totalDuration();
     const fps = 30;
-    const setPct = pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; };
+    const setPct = pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; if(opts.onRenderProgress) opts.onRenderProgress(pct); };
 
     let finalBlob = null, filename = currentPackFilename || 'hook-showcase.mp4';
     try{
@@ -6198,10 +6221,6 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
     // ---------- normal mode: bulk uploader + orchestrator ----------
     if(!embeddedMode){
-      if(batchWorkflowList) batchWorkflowList.innerHTML = STAGES.map((s,i)=>
-        `<div>${i+1}. ${s.label}</div>`
-      ).join('');
-
       // Cross-browser reality check, shown once up front instead of failing
       // silently pack-by-pack: WebCodecs export needs Chrome/Edge/Opera (or
       // Safari 17.4+); the MediaRecorder fallback covers most others but not
@@ -6246,6 +6265,9 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchPrepStatus = document.getElementById('batchPrepStatus');
       const batchStageDetail = document.getElementById('batchStageDetail');
       const batchWorkflowList = document.getElementById('batchWorkflowList');
+      if(batchWorkflowList) batchWorkflowList.innerHTML = STAGES.map((s,i)=>
+        `<div>${i+1}. ${s.label}</div>`
+      ).join('');
       const batchOpenGridBtn = document.getElementById('batchOpenGridBtn');
 
       const batchGridOverlay = document.getElementById('batchGridOverlay');
@@ -6254,6 +6276,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchGridSummary = document.getElementById('batchGridSummary');
       const batchGridStageLine = document.getElementById('batchGridStageLine');
       const batchGridLegend = document.getElementById('batchGridLegend');
+      const batchErrorPanel = document.getElementById('batchErrorPanel');
       const batchGrid = document.getElementById('batchGrid');
       const batchDownloadAllBtn = document.getElementById('batchDownloadAllBtn');
       const batchDownloadAllStatus = document.getElementById('batchDownloadAllStatus');
@@ -6621,7 +6644,8 @@ Reply with ONLY JSON. No prose, no markdown.`;
           if(idx>=0){
             currentPacks[idx].stage = data.stage;
             const stageIdx = STAGES.findIndex(s=>s.key===data.stage);
-            const stageText = `Pack #${currentPacks[idx].order} (${currentPacks[idx].folderName}) — Step ${stageIdx+1}/${STAGES.length}: ${stageLabel(data.stage)}…`;
+            const pctTxt = (typeof data.pct === 'number') ? ` (${data.pct}%)` : '';
+            const stageText = `Pack #${currentPacks[idx].order} (${currentPacks[idx].folderName}) — Step ${stageIdx+1}/${STAGES.length}: ${stageLabel(data.stage)}${pctTxt}…`;
             batchStageDetail.textContent = stageText;
             if(batchGridStageLine) batchGridStageLine.textContent = stageText;
             renderGrid();
@@ -6686,9 +6710,32 @@ Reply with ONLY JSON. No prose, no markdown.`;
           btn.title = `${p.folderName} — ${meta.label}${p.error ? ' ('+p.error+')' : ''}`;
           btn.style.cssText = `aspect-ratio:1;border-radius:6px;border:1px solid ${meta.color};background:${meta.bg};color:${meta.color};font-family:var(--mono);font-weight:800;font-size:13px;cursor:${clickable?'pointer':'default'};opacity:${clickable?'1':'0.6'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:2px;`;
           btn.innerHTML = `<span>#${p.order}</span><span style="font-size:8px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;">${p.status==='processing'?'…':meta.label}</span>`;
-          if(clickable) btn.addEventListener('click', ()=>openReview(p.id));
+          if(p.status === 'error'){
+            btn.addEventListener('click', ()=> showErrorPanel(p));
+          } else if(clickable){
+            btn.addEventListener('click', ()=>openReview(p.id));
+          }
           batchGrid.appendChild(btn);
         });
+      }
+
+      // Tapping an errored tile has no hover on mobile, so the stage+message stored
+      // in p.error (set from PREP_PACK_DONE / the note field) was invisible there —
+      // this surfaces it inline with a Retry (re-queue) and an Open editor escape hatch.
+      function showErrorPanel(p){
+        batchErrorPanel.style.display = 'block';
+        const stageTxt = p.stage ? ` at step "${stageLabel(p.stage)}"` : '';
+        batchErrorPanel.innerHTML = `<b>Pack #${p.order} (${p.folderName}) failed${stageTxt}:</b><br>${p.error || 'No error message was recorded.'}<br><br>`
+          + `<button type="button" id="errRetryBtn" style="font-family:var(--mono);font-size:10px;padding:4px 8px;margin-right:8px;cursor:pointer;">Retry this pack</button>`
+          + `<button type="button" id="errOpenBtn" style="font-family:var(--mono);font-size:10px;padding:4px 8px;cursor:pointer;">Open in editor</button>`;
+        document.getElementById('errRetryBtn').addEventListener('click', ()=>{
+          batchErrorPanel.style.display = 'none';
+          p.status = 'queued'; p.error = null;
+          idbGet('batchPacks', p.id).then(rec=>{ if(rec){ rec.status='queued'; rec.error=null; idbPut('batchPacks', rec); } });
+          renderGrid(); renderBatchSummary();
+          startPrep([p.id]);
+        });
+        document.getElementById('errOpenBtn').addEventListener('click', ()=> openReview(p.id));
       }
 
       // ---------- review: opens in a NEW TAB (not a same-tab navigation) ----------
@@ -6851,9 +6898,9 @@ window.addEventListener('message', async (ev)=>{
       parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
 
       let currentStage = null;
-      function setStage(key){
+      function setStage(key, pct){
         currentStage = key;
-        parent.postMessage({ type:'PREP_PACK_STAGE', packId: embeddedPackId, stage: key }, '*');
+        parent.postMessage({ type:'PREP_PACK_STAGE', packId: embeddedPackId, stage: key, pct: pct }, '*');
       }
 
       (async function runPrep(){
@@ -6901,11 +6948,26 @@ window.addEventListener('message', async (ev)=>{
               status = 'error'; note = speedResult.message || 'Speed step failed.';
             } else {
               setStage('sync');
-              const syncResult = await performVoiceSync();
+              let syncResult = await performVoiceSync();
+              // A clamped gap is the exact same "tighter than the audio needed" warning
+              // shown in the visible editor — the thing a person notices and fixes by
+              // just clicking Sync again (a fresh Groq call can land better timestamps;
+              // that's the whole reason a manual re-click "just works"). Pipeline had no
+              // way to see that warning before, so it kept the first, occasionally-noisy
+              // result. Do exactly what a manual re-click does: one retry with a fresh
+              // transcript (not the cached one) whenever the first pass was flagged.
+              if(syncResult.ok && syncResult.clampedGaps > 0){
+                cachedTranscript = null;
+                const retryResult = await performVoiceSync();
+                if(retryResult.ok) syncResult = retryResult;
+              }
               if(!syncResult.ok){
                 status = 'error'; note = syncResult.message || 'Sync failed.';
               } else {
                 status = 'ready_for_review';
+                if(syncResult.clampedGaps > 0){
+                  note = `Synced, but ${syncResult.clampedGaps} caption gap(s) were tighter than the spoken audio even after a retry — double-check timing in review.`;
+                }
               }
             }
           }
@@ -6934,8 +6996,8 @@ window.addEventListener('message', async (ev)=>{
         // straight through here and lands in batchRenders as 'done' with no manual step.
         if(status === 'ready_for_review'){
           try{
-            setStage('render');
-            const renderResult = await performExportAndDownload({ autoDownload:false });
+            setStage('render', 0);
+            const renderResult = await performExportAndDownload({ autoDownload:false, onRenderProgress: pct => setStage('render', pct) });
             if(renderResult && renderResult.ok){
               setStage('save');
               await idbPut('batchRenders', { id: embeddedPackId, blob: renderResult.blob });
