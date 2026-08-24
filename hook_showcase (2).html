@@ -810,15 +810,23 @@
         </div>
       </div>
       <div id="batchGridSummary" style="font-family:var(--mono);font-size:11px;color:rgba(242,240,230,0.7);margin:8px 0 4px;"></div>
+      <div id="batchGridStageLine" style="font-family:var(--mono);font-size:10px;color:var(--green-bright);margin-bottom:4px;min-height:14px;"></div>
       <div id="batchGridLegend" style="font-family:var(--mono);font-size:9px;color:rgba(242,240,230,0.5);margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap;"></div>
       <div id="batchDownloadAllStatus" style="display:none;font-family:var(--mono);font-size:10.5px;color:var(--green-bright);margin:0 0 10px;"></div>
       <div id="batchGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:8px;"></div>
     </div>
   </div>
 
-  <!-- headless — never shown. Runs the fixed pipeline (find mp3 → 1.12x speed →
-       sync → locked captions → default music) one pack at a time in the background. -->
-  <iframe id="batchPrepIframe" style="display:none;"></iframe>
+  <!-- headless — never shown to the person. Runs the fixed pipeline (find mp3 → 1.12x
+       speed → sync → locked captions/music → RENDER) one pack at a time in the background.
+       Deliberately NOT display:none: a display:none subtree is never composited, and
+       browsers throttle/suspend canvas painting and WebCodecs hardware video encoding
+       inside frames that aren't actually being rendered — which silently stalled the
+       render step forever with no error, since encode() calls just never fire their
+       output callback. Positioned off-screen with real (if tiny) opacity instead, so it's
+       invisible to the person but the browser still treats it as a live, rendered frame
+       and the encoder actually runs. -->
+  <iframe id="batchPrepIframe" style="position:fixed; left:-99999px; top:0; width:270px; height:480px; border:0; opacity:0.01; pointer-events:none;"></iframe>
 
   <div class="panel">
 
@@ -888,7 +896,12 @@
               <input type="number" id="batchSpeedInput" value="1.12" step="0.01" min="0.5" max="2" style="width:60px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
             </div>
             <button type="button" id="batchGenerateBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">▶ Start auto-prepare</button>
-            <div id="batchPrepStatus" style="font-size:9.5px;margin-bottom:8px;min-height:12px;color:var(--green-bright);"></div>
+            <div id="batchPrepStatus" style="font-size:9.5px;margin-bottom:4px;min-height:12px;color:var(--green-bright);"></div>
+            <div id="batchStageDetail" style="font-size:9px;margin-bottom:8px;min-height:11px;color:rgba(242,240,230,0.5);font-family:var(--mono);"></div>
+            <div style="border:1px solid var(--line);border-radius:4px;padding:8px;margin-bottom:8px;">
+              <div style="font-size:9px;color:rgba(242,240,230,0.45);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Per-pack pipeline — what "Start auto-prepare" runs</div>
+              <div id="batchWorkflowList" style="font-size:9.5px;line-height:1.65;"></div>
+            </div>
             <button type="button" id="batchOpenGridBtn" style="width:100%;background:#1c2118;color:var(--green-bright);border:1px solid var(--green-bright);border-radius:4px;padding:9px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;">⊞ Open pack grid</button>
           </div>
         </div>
@@ -914,8 +927,8 @@
       </div>
       <div class="timing-row">
         <span>Card length</span>
-        <input type="range" id="cardDurRange" min="1" max="10" step="0.01" value="3">
-        <span style="display:flex;align-items:center;gap:2px;"><input type="number" id="cardDurNum" min="1" max="10" step="0.01" value="3.00" style="width:56px;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:5px 4px;text-align:right;">s</span>
+        <input type="range" id="cardDurRange" min="1" max="10" step="0.01" value="2">
+        <span style="display:flex;align-items:center;gap:2px;"><input type="number" id="cardDurNum" min="1" max="10" step="0.01" value="2.00" style="width:56px;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:5px 4px;text-align:right;">s</span>
       </div>
       <div class="timing-row">
         <span>Card position</span>
@@ -925,7 +938,7 @@
         <span>Card color</span>
         <div style="display:flex;align-items:center;gap:8px;grid-column:2/4;">
           <div id="cardColorSwatch" title="Click to pick a custom color" style="width:26px;height:26px;border-radius:5px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;"></div>
-          <label class="toggle-row" style="margin:0;flex:1;"><input type="checkbox" id="cardColorAutoToggle" checked><span>Auto (from images)</span></label>
+          <label class="toggle-row" style="margin:0;flex:1;"><input type="checkbox" id="cardColorAutoToggle"><span>Auto (from images)</span></label>
         </div>
       </div>
       <div id="cardColorPicker" style="display:none;margin:2px 0 10px;padding:12px;border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,0.015);">
@@ -1218,8 +1231,8 @@
 
   // ---------- mutable timeline state ----------
   let hookDur = 0.2;                       // seconds per hook flash image
-  let cardDur = 3.0;                       // seconds, card segment
-  let cardPos = 0;                         // 0..N — card sits after this many showcase images
+  let cardDur = 2.00;                      // seconds, card segment
+  let cardPos = 5;                         // 0..N — card sits after this many showcase images (default: between image 5 and 6)
   let showDur = new Array(N).fill(1.0);    // seconds per showcase image
   let captionPos = { xNorm:0.06, yNorm:0.895, align:'left' }; // anchor for showcase captions
   let capPosOverride = new Array(N).fill(null); // per-caption custom position override (null = use captionPos)
@@ -1244,8 +1257,8 @@
   let bgMusicDuration = 0;           // seconds, full decoded length of the current track
   let currentEditingVideoId = null;  // id of the gallery video currently open in the editor, if any
   let currentEditorVoiceoverId = null; // voiceover attached to an unsaved editor session
-  let cardColorAuto = true;          // when true, card color is derived from loaded images
-  let cardColorManual = '#0e3d24';   // last manually picked color (hex)
+  let cardColorAuto = false;         // when true, card color is derived from loaded images — default off, card is plain white
+  let cardColorManual = '#ffffff';   // last manually picked color (hex) — default white
   let cardColorAlpha = 0.9;          // alpha applied to whichever color is active
   let cardColorComputed = '#0e3d24'; // last auto-computed color (hex, no alpha)
   let hueVal = 150, satVal = 0.7, valVal = 0.24; // current HSV of the card-color picker
@@ -2111,6 +2124,19 @@
     return matchedIdxs;
   }
 
+  // Groq's Whisper endpoint is NOT guaranteed to return byte-identical word timestamps for
+  // the same file on every call (batching/parallelism on their inference side can shift a
+  // borderline word's boundary by a few hundred ms, or occasionally which of two identical
+  // words gets picked). Everything downstream (alignment, anchor selection, duration split)
+  // is fully deterministic given the SAME word list — so re-transcribing on every click was
+  // the actual source of a caption's time changing between syncs even though nothing about
+  // the audio, captions, or speed was touched. Cache the transcript per (file, speed) and
+  // reuse it across clicks; only a genuinely new file or speed change re-hits the API.
+  let cachedTranscript = null; // { key, words, totalDur }
+  function audioCacheKey(file, speedFactor){
+    return `${file.name}|${file.size}|${file.lastModified}|${speedFactor.toFixed(3)}`;
+  }
+
   async function performVoiceSync(){
     const apiKey = groqKeyInput.value.trim();
     if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return { ok:false, message:'Add your Groq API key first.' }; }
@@ -2120,7 +2146,6 @@
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
-    syncStatus.textContent = 'Transcribing with Whisper…';
     try{
       // Transcribe the ORIGINAL, un-stretched upload whenever one exists — WSOLA time-stretch
       // (used by the speed changer) can smear consonants enough to hurt Whisper's accuracy at
@@ -2129,14 +2154,25 @@
       // sped-up file's shorter timeline afterward, so speed never affects alignment quality.
       const speedFactor = +voiceSpeedRange.value || 1;
       const useOriginalForTranscription = originalAudioFile && Math.abs(speedFactor-1) > 0.005;
-      const data = await transcribeWithGroq(useOriginalForTranscription ? originalAudioFile : audioFile, apiKey);
-      let words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
-      if(!words || !words.length) throw new Error('No word timestamps returned.');
-      if(useOriginalForTranscription){
-        // original was transcribed at 1x; map every timestamp onto the sped-up file's timeline
-        words = words.map(w => ({...w, start: w.start/speedFactor, end: w.end/speedFactor}));
+      const sourceFile = useOriginalForTranscription ? originalAudioFile : audioFile;
+      const cacheKey = audioCacheKey(sourceFile, speedFactor);
+      let words, totalDur;
+      if(cachedTranscript && cachedTranscript.key === cacheKey){
+        syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
+        words = cachedTranscript.words;
+        totalDur = cachedTranscript.totalDur;
+      } else {
+        syncStatus.textContent = 'Transcribing with Whisper…';
+        const data = await transcribeWithGroq(sourceFile, apiKey);
+        words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
+        if(!words || !words.length) throw new Error('No word timestamps returned.');
+        if(useOriginalForTranscription){
+          // original was transcribed at 1x; map every timestamp onto the sped-up file's timeline
+          words = words.map(w => ({...w, start: w.start/speedFactor, end: w.end/speedFactor}));
+        }
+        totalDur = words[words.length-1].end;
+        cachedTranscript = { key: cacheKey, words, totalDur };
       }
-      const totalDur = words[words.length-1].end;
 
       // pass 1 — force-align each caption's own text to where it's actually spoken
       syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
@@ -2230,27 +2266,61 @@
       let clampedGaps = 0;
       for(let b=0; b<boundaries.length-1; b++){
         const A = boundaries[b], B = boundaries[b+1];
-        // members of this group: A's own anchor caption (if A is a real matched anchor)
-        // plus any unmatched captions between A and the next anchor B
-        const members = [];
+        const hasAnchor = A.real;
+        const anchorIdx = hasAnchor ? A.idx : -1;
+        // any UNMATCHED captions riding alongside this anchor before the next anchor B
+        const restMembers = [];
         for(let i=A.idx; i<B.idx; i++){
-          if((i===A.idx && A.real) || (capTokensList[i].length && !matches[i])) members.push(i);
+          if(i===anchorIdx) continue;
+          if(capTokensList[i].length && !matches[i]) restMembers.push(i);
         }
-        if(!members.length) continue;
-        // subtract any fixed hook/card time that falls inside this window — that time is
-        // real screen time but isn't attributable to any of these captions' durations
-        const rawSpan = (B.t - A.t) - cardBetween(A.idx, B.idx);
-        const minSpan = 0.2 * members.length;
+        if(!hasAnchor && !restMembers.length) continue;
+
+        // A matched caption's duration comes ONLY from its own measured Whisper span
+        // (its own word start → its own word end) — it is never derived from where the
+        // NEXT caption's anchor happens to land. That coupling was the actual bug: even
+        // though a caption's own words matched identically every time, its assigned
+        // duration still moved whenever the *next* caption's match position shifted by
+        // even a fraction of a second (small run-to-run Whisper variance, WSOLA speed
+        // re-stretch rounding, etc). Making duration depend only on the caption's own
+        // anchor makes it fully immune to that — it can't move unless its own words'
+        // matched timestamps move.
+        let anchorDur = 0;
+        if(hasAnchor){
+          anchorDur = Math.max(0.2, +(matches[anchorIdx].end - matches[anchorIdx].start).toFixed(2));
+          newDur[anchorIdx] = anchorDur;
+          const label = (captions[anchorIdx]||'').trim();
+          rows.push({ i: anchorIdx, text: label.length>40 ? label.slice(0,40)+'…' : label, dur: anchorDur, matched: true, singleWord: matches[anchorIdx].singleWord });
+        }
+
+        if(!restMembers.length) continue;
+
+        // any UNMATCHED caption(s) sandwiched here get the genuine leftover time between
+        // where the anchor's own speech actually ends and where the next anchor's speech
+        // actually begins (not the anchor's own START — its END, so its own duration
+        // above is never double-counted here).
+        const cardTime = cardBetween(A.idx, B.idx);
+        const anchorEndT = hasAnchor ? matches[anchorIdx].end : A.t;
+        const rawSpan = (B.t - anchorEndT) - cardTime;
+        const minSpan = 0.2 * restMembers.length;
         const span = Math.max(minSpan, rawSpan);
         if(rawSpan < minSpan) clampedGaps++;
-        const weights = members.map(i => Math.max(1, capTokensList[i].length));
+        const weights = restMembers.map(i => Math.max(1, capTokensList[i].length));
         const wSum = weights.reduce((a,b)=>a+b,0);
-        members.forEach((i,k)=>{
+        restMembers.forEach((i,k)=>{
           const dur = Math.max(0.2, +(span * weights[k]/wSum).toFixed(2));
           newDur[i] = dur;
           const label = (captions[i]||'').trim();
-          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real, singleWord: i===A.idx && A.real && matches[i] && matches[i].singleWord });
+          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: false, singleWord: false });
         });
+      }
+
+      // Per your spec: caption 5 (index 4) runs 0.2s shorter than whatever the timing
+      // math above calculated for it, applied last so nothing above it interferes.
+      if(newDur.length > 4 && (captions[4]||'').trim()){
+        newDur[4] = Math.max(0.2, +(newDur[4] - 0.2).toFixed(2));
+        const r5 = rows.find(r => r.i === 4);
+        if(r5) r5.dur = newDur[4];
       }
 
 
@@ -3293,20 +3363,12 @@
   // ---------- locked caption rules (used by the 100-pack batch autopilot) ----------
   // Fixed, non-negotiable style so every batch video looks identical: no per-video
   // drift, no per-image position overrides, no per-word card positions. Hookflash
-  // and showcase reveal one word at a time; the card already does.
-  // REVERTED: cardPos and cardColorAuto used to be force-applied here (cardPos
-  // hard-set to 5), which is what made sync output differ from the old file for
-  // "the same audio/video/speed" — performVoiceSync's own timestamp math
-  // subtracts cardPos*cardDur as fixed screen time before mapping Whisper's
-  // timestamps onto image durations, so a different cardPos silently produces
-  // different durations even though performVoiceSync itself never changed.
-  // Restored to the old file's exact behavior: cardPos is left alone (stays at
-  // its plain default, 0) and showWordByWord goes back to true, so sync output
-  // matches the old file exactly for the same inputs.
+  // and showcase reveal one word at a time; the card already does. Card sits between
+  // image 5 and 6 at 2.30s — see pos_index/duration below.
   const LOCKED_CAPTION_RULES = {
     hook:     { fontSize:50, pos:{ xNorm:0.5, yNorm:0.5,  align:'center' } },
     showcase: { fontSize:34, pos:{ xNorm:0.5, yNorm:0.84, align:'center' } },
-    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 } }
+    card:     { fontSize:38, pos:{ xNorm:0.5, yNorm:0.5 }, pos_index:5, duration:2.00 } // between image 5 and 6, 2.00s
   };
   function applyLockedCaptionRules(){
     hookCapFontSize = LOCKED_CAPTION_RULES.hook.fontSize;
@@ -3316,18 +3378,36 @@
     capFontSize = LOCKED_CAPTION_RULES.showcase.fontSize;
     captionPos = { ...LOCKED_CAPTION_RULES.showcase.pos };
     capPosOverride = new Array(N).fill(null); // never let any single image drift from the locked position
-    showWordByWord = true;
+    showWordByWord = false; // showcase captions: OFF by default (hook still reveals one word at a time)
 
     cardFontSize = LOCKED_CAPTION_RULES.card.fontSize;
     cardTextPos = { ...LOCKED_CAPTION_RULES.card.pos };
     cardWordPosEnabled = {}; cardWordPos = {}; // never let per-word card positions shift left/right
+
+    // Card placement/duration IS part of the locked spec: between image 5 and 6, 2.00s.
+    // A previous edit here reset cardPos to 0 (card before image 1) on the mistaken idea
+    // that cardPos affecting performVoiceSync's timestamp math was itself a bug — it isn't;
+    // the card genuinely occupies real screen time that isn't spoken audio, so sync MUST
+    // account for it, and does correctly. Leaving cardPos at 0 didn't fix anything, it just
+    // silently misplaced the card at the start of every auto-prepared batch video instead
+    // of between image 5 and 6 where it belongs.
+    cardPos = LOCKED_CAPTION_RULES.card.pos_index;
+    cardDur = LOCKED_CAPTION_RULES.card.duration;
+
+    // Card color: plain white, not derived from the loaded images.
+    cardColorAuto = false;
+    cardColorManual = '#ffffff';
 
     try{
       document.getElementById('hookCapSizeVal').value = hookCapFontSize;
       capSizeVal.value = capFontSize;
       cardSizeVal.value = cardFontSize;
       hookWordToggle.checked = true;
-      showWordToggle.checked = true;
+      showWordToggle.checked = false;
+      cardDurRange.value = cardDur;
+      cardDurNum.value = cardDur.toFixed(2);
+      cardPosSelect.value = cardPos;
+      cardColorAutoToggle.checked = cardColorAuto;
     } catch(e){ /* fine if the editor UI isn't mounted yet */ }
   }
 
@@ -6101,8 +6181,27 @@ Reply with ONLY JSON. No prose, no markdown.`;
       error:             { label:'error',              color:'#e0574a',                bg:'#241010' }
     };
 
+    // The exact per-pack pipeline "Start auto-prepare" runs, in order. Used to (a) show
+    // the person what will happen before they click, and (b) tag exactly which step a
+    // pack is on / failed at, both live (via postMessage) and persisted (survives a
+    // reload, so a stuck/failed pack still shows its last known stage afterward).
+    const STAGES = [
+      { key:'manifest',  label:'Loading images & manifest' },
+      { key:'find_mp3',  label:'Finding matching MP3' },
+      { key:'speed',     label:'Applying voice-over speed' },
+      { key:'sync',      label:'Syncing captions to the voice-over (Whisper)' },
+      { key:'style',     label:'Applying locked captions/card style + default music' },
+      { key:'render',    label:'Rendering the final video' },
+      { key:'save',      label:'Saving to the batch library' }
+    ];
+    function stageLabel(key){ const s = STAGES.find(x=>x.key===key); return s ? s.label : (key||'—'); }
+
     // ---------- normal mode: bulk uploader + orchestrator ----------
     if(!embeddedMode){
+      if(batchWorkflowList) batchWorkflowList.innerHTML = STAGES.map((s,i)=>
+        `<div>${i+1}. ${s.label}</div>`
+      ).join('');
+
       // Cross-browser reality check, shown once up front instead of failing
       // silently pack-by-pack: WebCodecs export needs Chrome/Edge/Opera (or
       // Safari 17.4+); the MediaRecorder fallback covers most others but not
@@ -6145,12 +6244,15 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchSpeedInput = document.getElementById('batchSpeedInput');
       const batchGenerateBtn = document.getElementById('batchGenerateBtn');
       const batchPrepStatus = document.getElementById('batchPrepStatus');
+      const batchStageDetail = document.getElementById('batchStageDetail');
+      const batchWorkflowList = document.getElementById('batchWorkflowList');
       const batchOpenGridBtn = document.getElementById('batchOpenGridBtn');
 
       const batchGridOverlay = document.getElementById('batchGridOverlay');
       const batchGridCloseBtn = document.getElementById('batchGridCloseBtn');
       const batchGridTitle = document.getElementById('batchGridTitle');
       const batchGridSummary = document.getElementById('batchGridSummary');
+      const batchGridStageLine = document.getElementById('batchGridStageLine');
       const batchGridLegend = document.getElementById('batchGridLegend');
       const batchGrid = document.getElementById('batchGrid');
       const batchDownloadAllBtn = document.getElementById('batchDownloadAllBtn');
@@ -6413,8 +6515,13 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
       batchGenerateBtn.addEventListener('click', ()=>{
         if(!currentPacks.length){ setIngestStatus('Select a packs folder first.', false); return; }
-        const todo = currentPacks.filter(p => p.status === 'queued' || p.status === 'error' || p.status === 'no_match');
-        if(!todo.length){ batchPrepStatus.textContent = 'Every pack is already prepared or in progress.'; return; }
+        // Start = process EVERYTHING not already rendered. 'ready_for_review' is
+        // included on purpose: prep used to stop there and wait for someone to open
+        // each pack by hand before it would actually render — packs left sitting in
+        // that state (from before auto-render, or from a tab closing mid-render) would
+        // otherwise silently never get picked back up by a fresh "Start auto-prepare".
+        const todo = currentPacks.filter(p => p.status !== 'done' && p.status !== 'rendering' && p.status !== 'processing');
+        if(!todo.length){ batchPrepStatus.textContent = 'Every pack is already done.'; return; }
         startPrep(todo.map(p=>p.id));
       });
 
@@ -6422,6 +6529,16 @@ Reply with ONLY JSON. No prose, no markdown.`;
         prepQueue = prepQueue.concat(packIds.filter(id => !prepQueue.includes(id)));
         if(!prepRunning) runPrepQueue();
       }
+
+      // ---------- stall detection ----------
+      // A hard fixed timeout alone means a genuinely stuck pack either blocks the whole
+      // batch for its full duration before recovering, or (if set too short) kills packs
+      // that are just slow-but-fine. A heartbeat fixes both: the embedded prep page pings
+      // every few seconds while it's alive, and we only give up if pings actually stop —
+      // so a healthy pack can take as long as it needs, while a truly stalled one (e.g. an
+      // encoder callback that silently never fires) gets caught and skipped in under a
+      // minute instead of hanging the batch.
+      let lastHeartbeatAt = 0;
 
       async function runPrepQueue(){
         prepRunning = true;
@@ -6438,20 +6555,38 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
           const result = await new Promise(resolve=>{
             let settled = false;
-            const finish = (val)=>{ if(settled) return; settled = true; clearTimeout(timer); batchPrepIframe.onerror = null; resolve(val); };
+            const finish = (val)=>{ if(settled) return; settled = true; clearInterval(stallCheck); clearTimeout(hardCap); batchPrepIframe.onerror = null; resolve(val); };
             prepWaiter = finish;
-            const timer = setTimeout(()=>{
-              console.error('[batch] prep timed out for pack', packId);
-              finish({ status:'error', note:'Prep timed out (180s) — this browser may be blocking the hidden frame, or a required API is missing/slow.' });
+            lastHeartbeatAt = Date.now();
+
+            // stalled = no heartbeat for 45s straight — try this pack ONE more time
+            // (a fresh iframe load) before giving up on it entirely, since a single
+            // dropped heartbeat/hiccup shouldn't burn a whole pack.
+            let retriedOnce = false;
+            const stallCheck = setInterval(()=>{
+              if(Date.now() - lastHeartbeatAt < 45000) return;
+              if(!retriedOnce){
+                retriedOnce = true;
+                console.warn('[batch] no heartbeat for 45s, retrying pack', packId);
+                lastHeartbeatAt = Date.now();
+                batchPrepIframe.removeAttribute('src');
+                batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
+                return;
+              }
+              console.error('[batch] pack stalled twice, giving up', packId);
+              finish({ status:'error', note:'Pack stopped responding (no activity for 45s, twice) — this browser may be throttling background work, or a required API is missing/slow. Click Start auto-prepare again to retry it.' });
               batchPrepIframe.removeAttribute('src');
-              // FIX: 60s was too tight — MP3 match + 1.2x WSOLA stretch + Groq
-              // Whisper sync for a real voice-over routinely takes longer than
-              // that, especially on slower connections. A timeout here fired
-              // mid-pipeline and reported the pack as failed/no_match even
-              // though the pipeline was still legitimately running, which is
-              // why speed/sync silently never landed. 180s gives the sync
-              // step (the slowest part, since it hits a network API) real room.
-            }, 180000);
+            }, 5000);
+
+            // absolute outer cap regardless of heartbeats, so a pack that keeps pinging
+            // but genuinely never finishes (an actual infinite loop, not just a stall)
+            // can't hold the batch forever either.
+            const hardCap = setTimeout(()=>{
+              console.error('[batch] hard cap reached for pack', packId);
+              finish({ status:'error', note:'Prep hit the 10-minute hard cap for this pack — click Start auto-prepare again to retry it.' });
+              batchPrepIframe.removeAttribute('src');
+            }, 600000);
+
             batchPrepIframe.onerror = ()=> finish({ status:'error', note:'Hidden prep frame failed to load in this browser.' });
             batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
           });
@@ -6461,9 +6596,10 @@ Reply with ONLY JSON. No prose, no markdown.`;
             rec.status = result.status;
             rec.error = result.note || null;
             rec.matchInfo = result.matchInfo || null;
+            rec.stage = result.stage || null;
             await idbPut('batchPacks', rec);
           }
-          if(idx>=0){ currentPacks[idx].status = result.status; currentPacks[idx].error = result.note || null; }
+          if(idx>=0){ currentPacks[idx].status = result.status; currentPacks[idx].error = result.note || null; currentPacks[idx].stage = result.stage || null; }
           doneCount++;
           renderGrid(); renderBatchSummary();
         }
@@ -6475,9 +6611,26 @@ Reply with ONLY JSON. No prose, no markdown.`;
       window.addEventListener('message', (ev)=>{
         const data = ev.data;
         if(!data || typeof data !== 'object') return;
+        if(data.type === 'PREP_PACK_HEARTBEAT'){
+          lastHeartbeatAt = Date.now();
+          return;
+        }
+        if(data.type === 'PREP_PACK_STAGE'){
+          lastHeartbeatAt = Date.now(); // a stage update is itself proof of life
+          const idx = currentPacks.findIndex(p=>p.id===data.packId);
+          if(idx>=0){
+            currentPacks[idx].stage = data.stage;
+            const stageIdx = STAGES.findIndex(s=>s.key===data.stage);
+            const stageText = `Pack #${currentPacks[idx].order} (${currentPacks[idx].folderName}) — Step ${stageIdx+1}/${STAGES.length}: ${stageLabel(data.stage)}…`;
+            batchStageDetail.textContent = stageText;
+            if(batchGridStageLine) batchGridStageLine.textContent = stageText;
+            renderGrid();
+          }
+          return;
+        }
         if(data.type === 'PREP_PACK_DONE' && prepWaiter){
           const resolve = prepWaiter; prepWaiter = null;
-          resolve({ status: data.status, note: data.note, matchInfo: data.matchInfo });
+          resolve({ status: data.status, note: data.note, matchInfo: data.matchInfo, stage: data.stage });
         }
       });
 
@@ -6654,7 +6807,7 @@ window.addEventListener('message', async (ev)=>{
 
       batchDownloadAllBtn.addEventListener('click', async ()=>{
         const donePacks = currentPacks.filter(p=>p.status==='done');
-        if(!donePacks.length){ setDownloadAllStatus('No packs marked done yet — review and click "Reviewed — Good to Go" on at least one first.'); return; }
+        if(!donePacks.length){ setDownloadAllStatus('No packs rendered yet — click "Start auto-prepare" first; every pack renders automatically in the background.'); return; }
         batchDownloadAllBtn.disabled = true;
         try{
           const entries = [];
@@ -6665,7 +6818,7 @@ window.addEventListener('message', async (ev)=>{
               entries.push({ name: `${String(p.order).padStart(3,'0')}-${safeName}.mp4`, blob: rec.blob });
             }
           }
-          if(!entries.length){ setDownloadAllStatus('Renders were not found in the cache — reopen each pack and hit "Reviewed — Good to Go" again.'); return; }
+          if(!entries.length){ setDownloadAllStatus('Renders were not found in the cache — click "Start auto-prepare" again to re-render them.'); return; }
           const zipBlob = await buildZip(entries, (i,total,name)=> setDownloadAllStatus(`Zipping ${i}/${total} — ${name}…`));
           setDownloadAllStatus(`Done — ${entries.length} video(s) zipped. Starting download…`);
           const url = URL.createObjectURL(zipBlob);
@@ -6688,10 +6841,26 @@ window.addEventListener('message', async (ev)=>{
       const batchPanel = document.getElementById('batchPanel');
       if(batchPanel) batchPanel.style.display = 'none';
 
+      // Tells the parent tab "I'm still alive" every few seconds for the whole time this
+      // pack is being prepared/rendered. The parent uses gaps in these pings (not just a
+      // single fixed timeout) to detect a genuinely stalled pack and move on without
+      // holding up every other pack behind it.
+      const heartbeatTimer = setInterval(()=>{
+        parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
+      }, 4000);
+      parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
+
+      let currentStage = null;
+      function setStage(key){
+        currentStage = key;
+        parent.postMessage({ type:'PREP_PACK_STAGE', packId: embeddedPackId, stage: key }, '*');
+      }
+
       (async function runPrep(){
         const speed = +(urlParams.get('speed')) || 1.12;
         let status = 'error', note = null, matchInfo = null;
         try{
+          setStage('manifest');
           const rec = await idbGet('batchPacks', embeddedPackId);
           if(!rec) throw new Error('Pack not found — it may have been cleared.');
           currentPackFilename = (rec.folderName || ('pack-'+rec.order)).replace(/[^a-z0-9-_ ]/gi,'').trim().replace(/\s+/g,'-') + '.mp4';
@@ -6699,6 +6868,7 @@ window.addEventListener('message', async (ev)=>{
           await applyManifest(rec.items, rec.imageFiles, rec.root);
           applyLockedCaptionRules();
 
+          setStage('find_mp3');
           let matchResult = await performFindMatchMp3();
           // FIX: batch prep is unattended — nobody is there to click "assign
           // manually" on a sub-80% guess. Previously a 'guess' (or even a
@@ -6725,10 +6895,12 @@ window.addEventListener('message', async (ev)=>{
             // only ever appeared on the hidden headless iframe's own DOM,
             // which nobody ever sees, so it looked like matching never ran.
             matchInfo = { name: matchResult.name, confidence: matchResult.confidence, speed };
+            setStage('speed');
             const speedResult = await performApplyVoiceSpeed(speed);
             if(!speedResult.ok){
               status = 'error'; note = speedResult.message || 'Speed step failed.';
             } else {
+              setStage('sync');
               const syncResult = await performVoiceSync();
               if(!syncResult.ok){
                 status = 'error'; note = syncResult.message || 'Sync failed.';
@@ -6739,20 +6911,48 @@ window.addEventListener('message', async (ev)=>{
           }
         } catch(err){
           console.error(err);
-          status = 'error'; note = (err && err.message) || String(err);
+          status = 'error'; note = `[${stageLabel(currentStage)}] ` + ((err && err.message) || String(err));
         }
 
         try{
+          setStage('style');
           await applyDefaultBackgroundMusic();
           applyLockedCaptionRules(); // defensive re-lock — guarantees the saved template always has the exact spec'd sizes/positions, no matter what ran above
           const template = await collectTemplate();
           await idbPut('batchPackTemplates', { id: embeddedPackId, template });
         } catch(err){
           console.error('saving prepared template failed', err);
-          if(status !== 'error'){ status = 'error'; note = 'Prepared, but saving the project failed: ' + ((err&&err.message)||err); }
+          if(status !== 'error'){ status = 'error'; note = `[${stageLabel(currentStage)}] Prepared, but saving the project failed: ` + ((err&&err.message)||err); }
         }
 
-        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo }, '*');
+        // "Start auto-prepare" means the WHOLE pipeline runs unattended: match MP3 →
+        // speed → sync → captions/music → RENDER. Previously it stopped at
+        // 'ready_for_review' and the actual video only got rendered once someone opened
+        // that specific pack by hand and clicked "Reviewed — Good to Go" — which is
+        // exactly why "Download All into ZIP" kept saying nothing was done even after a
+        // full batch run finished. Now every pack that made it through prep renders
+        // straight through here and lands in batchRenders as 'done' with no manual step.
+        if(status === 'ready_for_review'){
+          try{
+            setStage('render');
+            const renderResult = await performExportAndDownload({ autoDownload:false });
+            if(renderResult && renderResult.ok){
+              setStage('save');
+              await idbPut('batchRenders', { id: embeddedPackId, blob: renderResult.blob });
+              status = 'done';
+            } else {
+              status = 'error';
+              note = `[${stageLabel('render')}] ` + ((renderResult && renderResult.message) || 'Render failed.');
+            }
+          } catch(err){
+            console.error('headless render failed', err);
+            status = 'error';
+            note = `[${stageLabel(currentStage)}] Render failed: ` + ((err&&err.message)||err);
+          }
+        }
+
+        clearInterval(heartbeatTimer);
+        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo, stage: currentStage }, '*');
       })();
     }
 
