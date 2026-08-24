@@ -908,10 +908,6 @@
             <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:9.5px;">
               <span>Voice-over speed</span>
               <input type="number" id="batchSpeedInput" value="1.12" step="0.01" min="0.5" max="2" style="width:60px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
-              <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:8px;" title="Refines every caption's start/end against the real waveform (AVSync-style), not just Whisper's raw timestamp.">
-                <input type="checkbox" id="batchAvsyncToggle" checked>
-                <span>Use AVSync-style sync</span>
-              </label>
             </div>
             <div style="font-size:9px;color:rgba(242,240,230,0.5);margin:-4px 0 8px;">Applies to every pack "Start auto-prepare" runs — same audio-verified boundary refinement as the manual Sync button.</div>
             <button type="button" id="batchGenerateBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">▶ Start auto-prepare</button>
@@ -1103,10 +1099,6 @@
       <div id="whisperBox" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
         <label style="display:block;margin-bottom:6px;">Groq API key (for voice sync, saved locally)</label>
         <input type="password" id="groqKeyInput" placeholder="gsk_..." style="width:100%;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;box-sizing:border-box;">
-        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;">
-          <input type="checkbox" id="avsyncRefineToggle" checked>
-          <span>Use AVSync-style audio sync <span style="opacity:.6;">(refines every caption's start/end against the real waveform, not just Whisper's raw timestamp)</span></span>
-        </label>
         <button class="align-btn" id="syncVoiceBtn" style="margin-top:8px;width:100%;">Sync captions to voice timing</button>
         <div class="ds" id="syncStatus" style="margin-top:6px;"></div>
         <div id="syncBreakdown" style="display:none;margin-top:8px;font-family:var(--mono);font-size:10px;line-height:1.6;color:rgba(242,240,230,0.75);"></div>
@@ -1253,7 +1245,6 @@
   const N = 10;
 
   // ---------- mutable timeline state ----------
-  let useAvsyncRefine = true;              // AVSync-style audio-energy boundary refinement (see performVoiceSync)
   let hookDur = 0.2;                       // seconds per hook flash image
   let cardDur = 2.00;                      // seconds, card segment
   let cardPos = 5;                         // 0..N — card sits after this many showcase images (default: between image 5 and 6)
@@ -1374,21 +1365,6 @@
   const whisperBox = document.getElementById('whisperBox');
   const groqKeyInput = document.getElementById('groqKeyInput');
   const syncVoiceBtn = document.getElementById('syncVoiceBtn');
-  const avsyncRefineToggle = document.getElementById('avsyncRefineToggle');
-  // Persisted across sessions; the headless batch-prep iframe overrides this per-pack from
-  // its own URL param (see the embeddedMode='prep' init below) so it always reflects
-  // whatever the batch panel's checkbox says at the moment each pack actually starts.
-  try{
-    const savedRefine = localStorage.getItem('useAvsyncRefine');
-    if(savedRefine !== null) useAvsyncRefine = savedRefine === '1';
-  }catch(e){}
-  if(avsyncRefineToggle){
-    avsyncRefineToggle.checked = useAvsyncRefine;
-    avsyncRefineToggle.addEventListener('change', ()=>{
-      useAvsyncRefine = avsyncRefineToggle.checked;
-      try{ localStorage.setItem('useAvsyncRefine', useAvsyncRefine ? '1' : '0'); }catch(e){}
-    });
-  }
   const syncStatus = document.getElementById('syncStatus');
   const syncBreakdown = document.getElementById('syncBreakdown');
   let previewAudioUrl = null;
@@ -2163,88 +2139,6 @@
     return matchedIdxs;
   }
 
-  // Groq's Whisper endpoint is NOT guaranteed to return byte-identical word timestamps for
-  // the same file on every call (batching/parallelism on their inference side can shift a
-  // borderline word's boundary by a few hundred ms, or occasionally which of two identical
-  // words gets picked). Everything downstream (alignment, anchor selection, duration split)
-  // is fully deterministic given the SAME word list — so re-transcribing on every click was
-  // the actual source of a caption's time changing between syncs even though nothing about
-  // the audio, captions, or speed was touched. Cache the transcript per (file, speed) and
-  // reuse it across clicks; only a genuinely new file or speed change re-hits the API.
-  let cachedTranscript = null; // { key, words, totalDur }
-  function audioCacheKey(file, speedFactor){
-    return `${file.name}|${file.size}|${file.lastModified}|${speedFactor.toFixed(3)}`;
-  }
-
-  // ---- AVSync-style audio-energy boundary refinement --------------------------------
-  // Inspired by github.com/stinkybread/avsync's dB-threshold audio segment detection:
-  // instead of trusting Whisper's own word start/end verbatim (Whisper quantizes to
-  // whatever frame boundary its model happened to land on — measurably the biggest
-  // source of "the card comes in before he finishes speaking" / captions cutting off
-  // mid-word), decode the real audio and walk outward from each matched word timestamp
-  // along the actual waveform energy to find where speech genuinely starts and stops.
-  // The envelope is built once per sync call and reused for every caption, so every
-  // caption's boundary ends up audio-verified — not just one hardcoded spot.
-  let avsyncEnvelopeCache = null; // { key, envelope }
-  async function buildAudioEnvelope(file){
-    const key = `${file.name}|${file.size}|${file.lastModified}`;
-    if(avsyncEnvelopeCache && avsyncEnvelopeCache.key === key) return avsyncEnvelopeCache.envelope;
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    let buf;
-    try{ buf = await ctx.decodeAudioData(await file.arrayBuffer()); }
-    finally { try{ ctx.close(); }catch(e){} }
-    const sr = buf.sampleRate;
-    const winSize = Math.max(1, Math.round(sr*0.01)); // 10ms windows: fine enough for word-boundary precision, coarse enough to be fast
-    const chans = []; for(let c=0;c<buf.numberOfChannels;c++) chans.push(buf.getChannelData(c));
-    const n = buf.length;
-    const numWindows = Math.ceil(n/winSize);
-    const db = new Float32Array(numWindows);
-    for(let w=0; w<numWindows; w++){
-      const s = w*winSize, e = Math.min(n, s+winSize);
-      let sumSq = 0, count = 0;
-      for(let c=0;c<chans.length;c++){ const data = chans[c]; for(let i=s;i<e;i++){ sumSq += data[i]*data[i]; count++; } }
-      const rms = count ? Math.sqrt(sumSq/count) : 0;
-      db[w] = rms > 0 ? 20*Math.log10(rms) : -100;
-    }
-    const envelope = { db, winSize, sr, numWindows };
-    avsyncEnvelopeCache = { key, envelope };
-    return envelope;
-  }
-  // Walk FORWARD from Whisper's reported word-end to find the real end of speech — this
-  // is what fixes a hard cut (into the card, or into the next image) landing before the
-  // word is actually finished. Only ever extends the end later, never earlier — it can't
-  // accidentally trim audible speech off.
-  function refineEndTime(env, guessT, opts){
-    const dbThreshold = (opts && opts.dbThreshold) ?? -40;
-    const maxExtend = (opts && opts.maxExtend) ?? 0.6;
-    const holdWindows = (opts && opts.holdWindows) ?? 4; // ~40ms of real silence required to call it "ended"
-    const wDur = env.winSize/env.sr;
-    let w = Math.round(guessT/wDur);
-    const maxW = Math.min(env.numWindows-1, w + Math.round(maxExtend/wDur));
-    let lastAbove = w, silentRun = 0;
-    for(let i=w;i<=maxW;i++){
-      if(env.db[i] > dbThreshold){ lastAbove = i; silentRun = 0; }
-      else { silentRun++; if(silentRun >= holdWindows) break; }
-    }
-    return Math.max(guessT, (lastAbove+1)*wDur);
-  }
-  // Walk BACKWARD from Whisper's reported word-start to catch a soft/quiet onset Whisper
-  // clipped late. Only ever pulls the start earlier, never later.
-  function refineStartTime(env, guessT, opts){
-    const dbThreshold = (opts && opts.dbThreshold) ?? -40;
-    const maxPull = (opts && opts.maxPull) ?? 0.35;
-    const holdWindows = (opts && opts.holdWindows) ?? 3;
-    const wDur = env.winSize/env.sr;
-    let w = Math.round(guessT/wDur);
-    const minW = Math.max(0, w - Math.round(maxPull/wDur));
-    let firstAbove = w, silentRun = 0;
-    for(let i=w;i>=minW;i--){
-      if(env.db[i] > dbThreshold){ firstAbove = i; silentRun = 0; }
-      else { silentRun++; if(silentRun >= holdWindows) break; }
-    }
-    return Math.min(guessT, firstAbove*wDur);
-  }
-
   async function performVoiceSync(){
     const apiKey = groqKeyInput.value.trim();
     if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return { ok:false, message:'Add your Groq API key first.' }; }
@@ -2254,6 +2148,7 @@
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
+    syncStatus.textContent = 'Transcribing with Whisper…';
     try{
       // Transcribe the ORIGINAL, un-stretched upload whenever one exists — WSOLA time-stretch
       // (used by the speed changer) can smear consonants enough to hurt Whisper's accuracy at
@@ -2262,25 +2157,14 @@
       // sped-up file's shorter timeline afterward, so speed never affects alignment quality.
       const speedFactor = +voiceSpeedRange.value || 1;
       const useOriginalForTranscription = originalAudioFile && Math.abs(speedFactor-1) > 0.005;
-      const sourceFile = useOriginalForTranscription ? originalAudioFile : audioFile;
-      const cacheKey = audioCacheKey(sourceFile, speedFactor);
-      let words, totalDur;
-      if(cachedTranscript && cachedTranscript.key === cacheKey){
-        syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
-        words = cachedTranscript.words;
-        totalDur = cachedTranscript.totalDur;
-      } else {
-        syncStatus.textContent = 'Transcribing with Whisper…';
-        const data = await transcribeWithGroq(sourceFile, apiKey);
-        words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
-        if(!words || !words.length) throw new Error('No word timestamps returned.');
-        if(useOriginalForTranscription){
-          // original was transcribed at 1x; map every timestamp onto the sped-up file's timeline
-          words = words.map(w => ({...w, start: w.start/speedFactor, end: w.end/speedFactor}));
-        }
-        totalDur = words[words.length-1].end;
-        cachedTranscript = { key: cacheKey, words, totalDur };
+      const data = await transcribeWithGroq(useOriginalForTranscription ? originalAudioFile : audioFile, apiKey);
+      let words = data.words || (data.segments||[]).flatMap(s=>s.words||[]);
+      if(!words || !words.length) throw new Error('No word timestamps returned.');
+      if(useOriginalForTranscription){
+        // original was transcribed at 1x; map every timestamp onto the sped-up file's timeline
+        words = words.map(w => ({...w, start: w.start/speedFactor, end: w.end/speedFactor}));
       }
+      const totalDur = words[words.length-1].end;
 
       // pass 1 — force-align each caption's own text to where it's actually spoken
       syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
@@ -2349,29 +2233,6 @@
       const matchedIdxs = matches.map((m,i)=> m ? i : -1).filter(i=>i>=0);
       if(!matchedIdxs.length) throw new Error('Could not match any caption text to the voice-over — check the captions match what\'s actually said.');
 
-      // pass 1.75 — AVSync-style audio-energy refinement of every matched anchor's
-      // start/end against the real waveform, instead of trusting Whisper's timestamp
-      // verbatim. Opt-in via the "Use AVSync-style audio sync" checkbox; when off, no
-      // audio decode happens at all and behavior is unchanged from before.
-      let avsyncRefined = 0;
-      if(useAvsyncRefine){
-        try{
-          syncStatus.textContent = 'Refining word boundaries against the real waveform (AVSync-style)…';
-          const env = await buildAudioEnvelope(audioFile);
-          for(const i of matchedIdxs){
-            const m = matches[i];
-            const refinedEnd = refineEndTime(env, m.end);
-            const refinedStart = refineStartTime(env, m.start);
-            if(refinedEnd > refinedStart){
-              if(refinedEnd !== m.end || refinedStart !== m.start) avsyncRefined++;
-              m.end = refinedEnd; m.start = refinedStart;
-            }
-          }
-        } catch(err){
-          console.error('AVSync-style refinement failed, continuing with raw Whisper timestamps', err);
-        }
-      }
-
       // pass 2 — turn matched anchor points into a full per-image duration timeline.
       // Whisper's word timestamps are ABSOLUTE audio time (t=0 = start of the mp3), and
       // the preview/export plays that same mp3 from t=0 against the FULL timeline: hook
@@ -2397,72 +2258,29 @@
       let clampedGaps = 0;
       for(let b=0; b<boundaries.length-1; b++){
         const A = boundaries[b], B = boundaries[b+1];
-        const hasAnchor = A.real;
-        const anchorIdx = hasAnchor ? A.idx : -1;
-        // any UNMATCHED captions riding alongside this anchor before the next anchor B
-        const restMembers = [];
+        // members of this group: A's own anchor caption (if A is a real matched anchor)
+        // plus any unmatched captions between A and the next anchor B
+        const members = [];
         for(let i=A.idx; i<B.idx; i++){
-          if(i===anchorIdx) continue;
-          if(capTokensList[i].length && !matches[i]) restMembers.push(i);
+          if((i===A.idx && A.real) || (capTokensList[i].length && !matches[i])) members.push(i);
         }
-        if(!hasAnchor && !restMembers.length) continue;
-
-        // A matched caption's duration comes ONLY from its own measured Whisper span
-        // (its own word start → its own word end) — it is never derived from where the
-        // NEXT caption's anchor happens to land. That coupling was the actual bug: even
-        // though a caption's own words matched identically every time, its assigned
-        // duration still moved whenever the *next* caption's match position shifted by
-        // even a fraction of a second (small run-to-run Whisper variance, WSOLA speed
-        // re-stretch rounding, etc). Making duration depend only on the caption's own
-        // anchor makes it fully immune to that — it can't move unless its own words'
-        // matched timestamps move.
-        let anchorDur = 0;
-        if(hasAnchor){
-          anchorDur = Math.max(0.2, +(matches[anchorIdx].end - matches[anchorIdx].start).toFixed(2));
-          newDur[anchorIdx] = anchorDur;
-          const label = (captions[anchorIdx]||'').trim();
-          rows.push({ i: anchorIdx, text: label.length>40 ? label.slice(0,40)+'…' : label, dur: anchorDur, matched: true, singleWord: matches[anchorIdx].singleWord });
-        }
-
-        if(!restMembers.length) continue;
-
-        // any UNMATCHED caption(s) sandwiched here get the genuine leftover time between
-        // where the anchor's own speech actually ends and where the next anchor's speech
-        // actually begins (not the anchor's own START — its END, so its own duration
-        // above is never double-counted here).
-        const cardTime = cardBetween(A.idx, B.idx);
-        const anchorEndT = hasAnchor ? matches[anchorIdx].end : A.t;
-        const rawSpan = (B.t - anchorEndT) - cardTime;
-        const minSpan = 0.2 * restMembers.length;
+        if(!members.length) continue;
+        // subtract any fixed hook/card time that falls inside this window — that time is
+        // real screen time but isn't attributable to any of these captions' durations
+        const rawSpan = (B.t - A.t) - cardBetween(A.idx, B.idx);
+        const minSpan = 0.2 * members.length;
         const span = Math.max(minSpan, rawSpan);
         if(rawSpan < minSpan) clampedGaps++;
-        const weights = restMembers.map(i => Math.max(1, capTokensList[i].length));
+        const weights = members.map(i => Math.max(1, capTokensList[i].length));
         const wSum = weights.reduce((a,b)=>a+b,0);
-        restMembers.forEach((i,k)=>{
+        members.forEach((i,k)=>{
           const dur = Math.max(0.2, +(span * weights[k]/wSum).toFixed(2));
           newDur[i] = dur;
           const label = (captions[i]||'').trim();
-          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: false, singleWord: false });
+          rows.push({ i, text: label.length>40 ? label.slice(0,40)+'…' : label, dur, matched: i===A.idx && A.real, singleWord: i===A.idx && A.real && matches[i] && matches[i].singleWord });
         });
       }
 
-
-      // Card-cut breathing room: a hard cut into the card is far more jarring than an
-      // image-to-image transition, so a slightly-early Whisper word-end on the ONE caption
-      // right before the card (index cardPos-1) is the one boundary viewers actually notice
-      // — the card visually appears a beat before he finishes speaking. This does not change
-      // any alignment/matching math above; it only nudges how long that single image stays
-      // on screen once its duration has already been decided, so every other caption's
-      // timing (including its own anchor detection) is completely untouched.
-      const CARD_CUT_PAD = 0.8; // seconds of extra hold before the hard cut into the card
-      const preCardIdx = cardPos - 1;
-      if(preCardIdx >= 0 && preCardIdx < N && newDur[preCardIdx] != null){
-        const preCardRow = rows.find(r => r.i === preCardIdx);
-        if(preCardRow){ // only pad captions the sync actually touched this run
-          newDur[preCardIdx] = +(newDur[preCardIdx] + CARD_CUT_PAD).toFixed(2);
-          preCardRow.dur = newDur[preCardIdx];
-        }
-      }
 
       // Safety net: the mp3 is the master timeline — the image/caption timeline must never end
       // before the audio does. If rounding or a fully-unmatched tail still leaves the visual
@@ -2480,13 +2298,13 @@
       drawPreviewFrame(0);
       const missed = capTokensList.filter(t=>t.length).length - matchedIdxs.length;
       syncStatus.style.color = clampedGaps>0 ? '#e0a94a' : '#8fd19e';
-      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${useAvsyncRefine ? ` ${avsyncRefined} boundary(s) refined against the real waveform (AVSync-style).` : ''}${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
+      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
       syncBreakdown.style.display = 'block';
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched ? (r.singleWord ? '#8fc7d1' : 'var(--green-bright)') : '#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched ? (r.singleWord ? ' <span style="opacity:.6;">(anchored on 1 word)</span>' : '') : ' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
       syncVoiceBtn.disabled = false;
-      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length, clampedGaps, missed, avsyncRefined };
+      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length, clampedGaps, missed };
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
@@ -6399,15 +6217,6 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchListWrap = document.getElementById('batchListWrap');
       const batchListSummary = document.getElementById('batchListSummary');
       const batchSpeedInput = document.getElementById('batchSpeedInput');
-      const batchAvsyncToggle = document.getElementById('batchAvsyncToggle');
-      if(batchAvsyncToggle){
-        batchAvsyncToggle.checked = useAvsyncRefine;
-        batchAvsyncToggle.addEventListener('change', ()=>{
-          useAvsyncRefine = batchAvsyncToggle.checked;
-          if(avsyncRefineToggle) avsyncRefineToggle.checked = useAvsyncRefine; // keep the manual-editor checkbox in sync too
-          try{ localStorage.setItem('useAvsyncRefine', useAvsyncRefine ? '1' : '0'); }catch(e){}
-        });
-      }
       const batchGenerateBtn = document.getElementById('batchGenerateBtn');
       const batchPrepStatus = document.getElementById('batchPrepStatus');
       const batchStageDetail = document.getElementById('batchStageDetail');
@@ -6729,7 +6538,6 @@ Reply with ONLY JSON. No prose, no markdown.`;
           // mid-prep keeps its own speed (it already ran the speed step), but every
           // pack still in the queue picks up the current value.
           const speed = +batchSpeedInput.value || 1.12;
-          const avsync = batchAvsyncToggle ? (batchAvsyncToggle.checked ? 1 : 0) : (useAvsyncRefine ? 1 : 0);
           currentPacks[idx].status = 'processing';
           renderGrid(); renderBatchSummary();
           batchPrepStatus.textContent = `Preparing pack #${currentPacks[idx].order} (${currentPacks[idx].folderName}) — ${doneCount}/${total} done so far…`;
@@ -6751,7 +6559,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
                 console.warn('[batch] no heartbeat for 45s, retrying pack', packId);
                 lastHeartbeatAt = Date.now();
                 batchPrepIframe.removeAttribute('src');
-                batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&avsync=${avsync}&_t=${Date.now()}`;
+                batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
                 return;
               }
               console.error('[batch] pack stalled twice, giving up', packId);
@@ -6769,7 +6577,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
             }, 600000);
 
             batchPrepIframe.onerror = ()=> finish({ status:'error', note:'Hidden prep frame failed to load in this browser.' });
-            batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&avsync=${avsync}&_t=${Date.now()}`;
+            batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
           });
 
           const rec = await idbGet('batchPacks', packId).catch(()=>null);
@@ -7110,9 +6918,6 @@ window.addEventListener('message', async (ev)=>{
 
       (async function runPrep(){
         const speed = +(urlParams.get('speed')) || 1.12;
-        // Live per-pack override from the batch panel's checkbox at the moment this pack
-        // started (see runPrepQueue) — defaults to on (matches the manual editor's default).
-        useAvsyncRefine = urlParams.get('avsync') !== '0';
         let status = 'error', note = null, matchInfo = null, syncLog = null;
         try{
           setStage('manifest');
@@ -7177,7 +6982,6 @@ window.addEventListener('message', async (ev)=>{
               // person applies manually, not a lighter one.
               const isWeakSync = (r) => r.ok && (r.clampedGaps > 0 || r.matched < r.total);
               if(isWeakSync(syncResult)){
-                cachedTranscript = null;
                 const retryResult = await performVoiceSync();
                 if(retryResult.ok){ syncResult = retryResult; syncRetried = true; }
               }
