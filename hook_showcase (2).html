@@ -813,6 +813,10 @@
       <div id="batchGridStageLine" style="font-family:var(--mono);font-size:10px;color:var(--green-bright);margin-bottom:4px;min-height:14px;"></div>
       <div id="batchGridLegend" style="font-family:var(--mono);font-size:9px;color:rgba(242,240,230,0.5);margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap;"></div>
       <div id="batchErrorPanel" style="display:none;font-family:var(--mono);font-size:11px;color:#e0866a;background:rgba(224,134,106,0.08);border:1px solid #e0866a;border-radius:4px;padding:8px 10px;margin-bottom:10px;"></div>
+      <!-- Per-pack sync log: same breakdown "Synced — N/N captions force-aligned…" text +
+           per-caption line list that the manual "Sync captions to voice timing" button shows,
+           just replayed here from what the headless pipeline actually produced for that pack. -->
+      <div id="batchSyncLogPanel" style="display:none;font-family:var(--mono);font-size:11px;color:rgba(242,240,230,0.85);background:rgba(31,174,102,0.06);border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin-bottom:10px;max-height:260px;overflow:auto;"></div>
       <div id="batchDownloadAllStatus" style="display:none;font-family:var(--mono);font-size:10.5px;color:var(--green-bright);margin:0 0 10px;"></div>
       <div id="batchGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:8px;"></div>
     </div>
@@ -904,7 +908,12 @@
             <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:9.5px;">
               <span>Voice-over speed</span>
               <input type="number" id="batchSpeedInput" value="1.12" step="0.01" min="0.5" max="2" style="width:60px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:6px;font-family:var(--mono);">
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:8px;" title="Refines every caption's start/end against the real waveform (AVSync-style), not just Whisper's raw timestamp.">
+                <input type="checkbox" id="batchAvsyncToggle" checked>
+                <span>Use AVSync-style sync</span>
+              </label>
             </div>
+            <div style="font-size:9px;color:rgba(242,240,230,0.5);margin:-4px 0 8px;">Applies to every pack "Start auto-prepare" runs — same audio-verified boundary refinement as the manual Sync button.</div>
             <button type="button" id="batchGenerateBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">▶ Start auto-prepare</button>
             <div id="batchPrepStatus" style="font-size:9.5px;margin-bottom:4px;min-height:12px;color:var(--green-bright);"></div>
             <div id="batchStageDetail" style="font-size:9px;margin-bottom:8px;min-height:11px;color:rgba(242,240,230,0.5);font-family:var(--mono);"></div>
@@ -1094,6 +1103,10 @@
       <div id="whisperBox" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
         <label style="display:block;margin-bottom:6px;">Groq API key (for voice sync, saved locally)</label>
         <input type="password" id="groqKeyInput" placeholder="gsk_..." style="width:100%;background:#0d0f0c;border:1px solid var(--line);border-radius:3px;color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 8px;box-sizing:border-box;">
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;">
+          <input type="checkbox" id="avsyncRefineToggle" checked>
+          <span>Use AVSync-style audio sync <span style="opacity:.6;">(refines every caption's start/end against the real waveform, not just Whisper's raw timestamp)</span></span>
+        </label>
         <button class="align-btn" id="syncVoiceBtn" style="margin-top:8px;width:100%;">Sync captions to voice timing</button>
         <div class="ds" id="syncStatus" style="margin-top:6px;"></div>
         <div id="syncBreakdown" style="display:none;margin-top:8px;font-family:var(--mono);font-size:10px;line-height:1.6;color:rgba(242,240,230,0.75);"></div>
@@ -1240,6 +1253,7 @@
   const N = 10;
 
   // ---------- mutable timeline state ----------
+  let useAvsyncRefine = true;              // AVSync-style audio-energy boundary refinement (see performVoiceSync)
   let hookDur = 0.2;                       // seconds per hook flash image
   let cardDur = 2.00;                      // seconds, card segment
   let cardPos = 5;                         // 0..N — card sits after this many showcase images (default: between image 5 and 6)
@@ -1360,6 +1374,21 @@
   const whisperBox = document.getElementById('whisperBox');
   const groqKeyInput = document.getElementById('groqKeyInput');
   const syncVoiceBtn = document.getElementById('syncVoiceBtn');
+  const avsyncRefineToggle = document.getElementById('avsyncRefineToggle');
+  // Persisted across sessions; the headless batch-prep iframe overrides this per-pack from
+  // its own URL param (see the embeddedMode='prep' init below) so it always reflects
+  // whatever the batch panel's checkbox says at the moment each pack actually starts.
+  try{
+    const savedRefine = localStorage.getItem('useAvsyncRefine');
+    if(savedRefine !== null) useAvsyncRefine = savedRefine === '1';
+  }catch(e){}
+  if(avsyncRefineToggle){
+    avsyncRefineToggle.checked = useAvsyncRefine;
+    avsyncRefineToggle.addEventListener('change', ()=>{
+      useAvsyncRefine = avsyncRefineToggle.checked;
+      try{ localStorage.setItem('useAvsyncRefine', useAvsyncRefine ? '1' : '0'); }catch(e){}
+    });
+  }
   const syncStatus = document.getElementById('syncStatus');
   const syncBreakdown = document.getElementById('syncBreakdown');
   let previewAudioUrl = null;
@@ -2147,6 +2176,75 @@
     return `${file.name}|${file.size}|${file.lastModified}|${speedFactor.toFixed(3)}`;
   }
 
+  // ---- AVSync-style audio-energy boundary refinement --------------------------------
+  // Inspired by github.com/stinkybread/avsync's dB-threshold audio segment detection:
+  // instead of trusting Whisper's own word start/end verbatim (Whisper quantizes to
+  // whatever frame boundary its model happened to land on — measurably the biggest
+  // source of "the card comes in before he finishes speaking" / captions cutting off
+  // mid-word), decode the real audio and walk outward from each matched word timestamp
+  // along the actual waveform energy to find where speech genuinely starts and stops.
+  // The envelope is built once per sync call and reused for every caption, so every
+  // caption's boundary ends up audio-verified — not just one hardcoded spot.
+  let avsyncEnvelopeCache = null; // { key, envelope }
+  async function buildAudioEnvelope(file){
+    const key = `${file.name}|${file.size}|${file.lastModified}`;
+    if(avsyncEnvelopeCache && avsyncEnvelopeCache.key === key) return avsyncEnvelopeCache.envelope;
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    let buf;
+    try{ buf = await ctx.decodeAudioData(await file.arrayBuffer()); }
+    finally { try{ ctx.close(); }catch(e){} }
+    const sr = buf.sampleRate;
+    const winSize = Math.max(1, Math.round(sr*0.01)); // 10ms windows: fine enough for word-boundary precision, coarse enough to be fast
+    const chans = []; for(let c=0;c<buf.numberOfChannels;c++) chans.push(buf.getChannelData(c));
+    const n = buf.length;
+    const numWindows = Math.ceil(n/winSize);
+    const db = new Float32Array(numWindows);
+    for(let w=0; w<numWindows; w++){
+      const s = w*winSize, e = Math.min(n, s+winSize);
+      let sumSq = 0, count = 0;
+      for(let c=0;c<chans.length;c++){ const data = chans[c]; for(let i=s;i<e;i++){ sumSq += data[i]*data[i]; count++; } }
+      const rms = count ? Math.sqrt(sumSq/count) : 0;
+      db[w] = rms > 0 ? 20*Math.log10(rms) : -100;
+    }
+    const envelope = { db, winSize, sr, numWindows };
+    avsyncEnvelopeCache = { key, envelope };
+    return envelope;
+  }
+  // Walk FORWARD from Whisper's reported word-end to find the real end of speech — this
+  // is what fixes a hard cut (into the card, or into the next image) landing before the
+  // word is actually finished. Only ever extends the end later, never earlier — it can't
+  // accidentally trim audible speech off.
+  function refineEndTime(env, guessT, opts){
+    const dbThreshold = (opts && opts.dbThreshold) ?? -40;
+    const maxExtend = (opts && opts.maxExtend) ?? 0.6;
+    const holdWindows = (opts && opts.holdWindows) ?? 4; // ~40ms of real silence required to call it "ended"
+    const wDur = env.winSize/env.sr;
+    let w = Math.round(guessT/wDur);
+    const maxW = Math.min(env.numWindows-1, w + Math.round(maxExtend/wDur));
+    let lastAbove = w, silentRun = 0;
+    for(let i=w;i<=maxW;i++){
+      if(env.db[i] > dbThreshold){ lastAbove = i; silentRun = 0; }
+      else { silentRun++; if(silentRun >= holdWindows) break; }
+    }
+    return Math.max(guessT, (lastAbove+1)*wDur);
+  }
+  // Walk BACKWARD from Whisper's reported word-start to catch a soft/quiet onset Whisper
+  // clipped late. Only ever pulls the start earlier, never later.
+  function refineStartTime(env, guessT, opts){
+    const dbThreshold = (opts && opts.dbThreshold) ?? -40;
+    const maxPull = (opts && opts.maxPull) ?? 0.35;
+    const holdWindows = (opts && opts.holdWindows) ?? 3;
+    const wDur = env.winSize/env.sr;
+    let w = Math.round(guessT/wDur);
+    const minW = Math.max(0, w - Math.round(maxPull/wDur));
+    let firstAbove = w, silentRun = 0;
+    for(let i=w;i>=minW;i--){
+      if(env.db[i] > dbThreshold){ firstAbove = i; silentRun = 0; }
+      else { silentRun++; if(silentRun >= holdWindows) break; }
+    }
+    return Math.min(guessT, firstAbove*wDur);
+  }
+
   async function performVoiceSync(){
     const apiKey = groqKeyInput.value.trim();
     if(!apiKey){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add your Groq API key first.'; return { ok:false, message:'Add your Groq API key first.' }; }
@@ -2251,6 +2349,29 @@
       const matchedIdxs = matches.map((m,i)=> m ? i : -1).filter(i=>i>=0);
       if(!matchedIdxs.length) throw new Error('Could not match any caption text to the voice-over — check the captions match what\'s actually said.');
 
+      // pass 1.75 — AVSync-style audio-energy refinement of every matched anchor's
+      // start/end against the real waveform, instead of trusting Whisper's timestamp
+      // verbatim. Opt-in via the "Use AVSync-style audio sync" checkbox; when off, no
+      // audio decode happens at all and behavior is unchanged from before.
+      let avsyncRefined = 0;
+      if(useAvsyncRefine){
+        try{
+          syncStatus.textContent = 'Refining word boundaries against the real waveform (AVSync-style)…';
+          const env = await buildAudioEnvelope(audioFile);
+          for(const i of matchedIdxs){
+            const m = matches[i];
+            const refinedEnd = refineEndTime(env, m.end);
+            const refinedStart = refineStartTime(env, m.start);
+            if(refinedEnd > refinedStart){
+              if(refinedEnd !== m.end || refinedStart !== m.start) avsyncRefined++;
+              m.end = refinedEnd; m.start = refinedStart;
+            }
+          }
+        } catch(err){
+          console.error('AVSync-style refinement failed, continuing with raw Whisper timestamps', err);
+        }
+      }
+
       // pass 2 — turn matched anchor points into a full per-image duration timeline.
       // Whisper's word timestamps are ABSOLUTE audio time (t=0 = start of the mp3), and
       // the preview/export plays that same mp3 from t=0 against the FULL timeline: hook
@@ -2326,6 +2447,23 @@
       }
 
 
+      // Card-cut breathing room: a hard cut into the card is far more jarring than an
+      // image-to-image transition, so a slightly-early Whisper word-end on the ONE caption
+      // right before the card (index cardPos-1) is the one boundary viewers actually notice
+      // — the card visually appears a beat before he finishes speaking. This does not change
+      // any alignment/matching math above; it only nudges how long that single image stays
+      // on screen once its duration has already been decided, so every other caption's
+      // timing (including its own anchor detection) is completely untouched.
+      const CARD_CUT_PAD = 0.8; // seconds of extra hold before the hard cut into the card
+      const preCardIdx = cardPos - 1;
+      if(preCardIdx >= 0 && preCardIdx < N && newDur[preCardIdx] != null){
+        const preCardRow = rows.find(r => r.i === preCardIdx);
+        if(preCardRow){ // only pad captions the sync actually touched this run
+          newDur[preCardIdx] = +(newDur[preCardIdx] + CARD_CUT_PAD).toFixed(2);
+          preCardRow.dur = newDur[preCardIdx];
+        }
+      }
+
       // Safety net: the mp3 is the master timeline — the image/caption timeline must never end
       // before the audio does. If rounding or a fully-unmatched tail still leaves the visual
       // timeline short of totalDur, stretch the last caption so the audio is never cut off.
@@ -2342,13 +2480,13 @@
       drawPreviewFrame(0);
       const missed = capTokensList.filter(t=>t.length).length - matchedIdxs.length;
       syncStatus.style.color = clampedGaps>0 ? '#e0a94a' : '#8fd19e';
-      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
+      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${useAvsyncRefine ? ` ${avsyncRefined} boundary(s) refined against the real waveform (AVSync-style).` : ''}${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
       syncBreakdown.style.display = 'block';
       syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched ? (r.singleWord ? '#8fc7d1' : 'var(--green-bright)') : '#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched ? (r.singleWord ? ' <span style="opacity:.6;">(anchored on 1 word)</span>' : '') : ' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
       syncVoiceBtn.disabled = false;
-      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length, clampedGaps, missed };
+      return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length, clampedGaps, missed, avsyncRefined };
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
@@ -6261,6 +6399,15 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchListWrap = document.getElementById('batchListWrap');
       const batchListSummary = document.getElementById('batchListSummary');
       const batchSpeedInput = document.getElementById('batchSpeedInput');
+      const batchAvsyncToggle = document.getElementById('batchAvsyncToggle');
+      if(batchAvsyncToggle){
+        batchAvsyncToggle.checked = useAvsyncRefine;
+        batchAvsyncToggle.addEventListener('change', ()=>{
+          useAvsyncRefine = batchAvsyncToggle.checked;
+          if(avsyncRefineToggle) avsyncRefineToggle.checked = useAvsyncRefine; // keep the manual-editor checkbox in sync too
+          try{ localStorage.setItem('useAvsyncRefine', useAvsyncRefine ? '1' : '0'); }catch(e){}
+        });
+      }
       const batchGenerateBtn = document.getElementById('batchGenerateBtn');
       const batchPrepStatus = document.getElementById('batchPrepStatus');
       const batchStageDetail = document.getElementById('batchStageDetail');
@@ -6277,6 +6424,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchGridStageLine = document.getElementById('batchGridStageLine');
       const batchGridLegend = document.getElementById('batchGridLegend');
       const batchErrorPanel = document.getElementById('batchErrorPanel');
+      const batchSyncLogPanel = document.getElementById('batchSyncLogPanel');
       const batchGrid = document.getElementById('batchGrid');
       const batchDownloadAllBtn = document.getElementById('batchDownloadAllBtn');
       const batchDownloadAllStatus = document.getElementById('batchDownloadAllStatus');
@@ -6565,13 +6713,23 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
       async function runPrepQueue(){
         prepRunning = true;
-        const speed = +batchSpeedInput.value || 1.12;
         let doneCount = currentPacks.filter(p=>p.status==='ready_for_review'||p.status==='done'||p.status==='no_match').length;
         const total = currentPacks.length;
         while(prepQueue.length){
           const packId = prepQueue.shift();
           const idx = currentPacks.findIndex(p=>p.id===packId);
           if(idx<0) continue;
+          // FIX: this used to read batchSpeedInput.value ONCE before the whole queue
+          // started, so typing a new speed while packs were already queued/processing
+          // (exactly what the screenshot showed — 3 done, 1 preparing, speed box
+          // changed to 1.13) never reached the remaining packs; they silently kept
+          // whatever speed was in the box the moment "Start auto-prepare" was first
+          // clicked. Reading it fresh for each pack, right before it starts, means the
+          // speed box always applies to whatever hasn't started yet — a pack already
+          // mid-prep keeps its own speed (it already ran the speed step), but every
+          // pack still in the queue picks up the current value.
+          const speed = +batchSpeedInput.value || 1.12;
+          const avsync = batchAvsyncToggle ? (batchAvsyncToggle.checked ? 1 : 0) : (useAvsyncRefine ? 1 : 0);
           currentPacks[idx].status = 'processing';
           renderGrid(); renderBatchSummary();
           batchPrepStatus.textContent = `Preparing pack #${currentPacks[idx].order} (${currentPacks[idx].folderName}) — ${doneCount}/${total} done so far…`;
@@ -6593,7 +6751,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
                 console.warn('[batch] no heartbeat for 45s, retrying pack', packId);
                 lastHeartbeatAt = Date.now();
                 batchPrepIframe.removeAttribute('src');
-                batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
+                batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&avsync=${avsync}&_t=${Date.now()}`;
                 return;
               }
               console.error('[batch] pack stalled twice, giving up', packId);
@@ -6611,7 +6769,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
             }, 600000);
 
             batchPrepIframe.onerror = ()=> finish({ status:'error', note:'Hidden prep frame failed to load in this browser.' });
-            batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&_t=${Date.now()}`;
+            batchPrepIframe.src = baseUrl() + `?embedded=1&mode=prep&packId=${packId}&speed=${speed}&avsync=${avsync}&_t=${Date.now()}`;
           });
 
           const rec = await idbGet('batchPacks', packId).catch(()=>null);
@@ -6620,9 +6778,15 @@ Reply with ONLY JSON. No prose, no markdown.`;
             rec.error = result.note || null;
             rec.matchInfo = result.matchInfo || null;
             rec.stage = result.stage || null;
+            if(result.syncLog) rec.syncLog = result.syncLog;
             await idbPut('batchPacks', rec);
           }
-          if(idx>=0){ currentPacks[idx].status = result.status; currentPacks[idx].error = result.note || null; currentPacks[idx].stage = result.stage || null; }
+          if(idx>=0){
+            currentPacks[idx].status = result.status;
+            currentPacks[idx].error = result.note || null;
+            currentPacks[idx].stage = result.stage || null;
+            if(result.syncLog) currentPacks[idx].syncLog = result.syncLog;
+          }
           doneCount++;
           renderGrid(); renderBatchSummary();
         }
@@ -6654,7 +6818,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
         }
         if(data.type === 'PREP_PACK_DONE' && prepWaiter){
           const resolve = prepWaiter; prepWaiter = null;
-          resolve({ status: data.status, note: data.note, matchInfo: data.matchInfo, stage: data.stage });
+          resolve({ status: data.status, note: data.note, matchInfo: data.matchInfo, stage: data.stage, syncLog: data.syncLog || null });
         }
       });
 
@@ -6704,25 +6868,66 @@ Reply with ONLY JSON. No prose, no markdown.`;
         batchGrid.innerHTML = '';
         currentPacks.forEach(p=>{
           const meta = STATUS_META[p.status] || STATUS_META.queued;
+          const wrap = document.createElement('div');
+          wrap.style.cssText = 'position:relative;aspect-ratio:1;';
+
           const btn = document.createElement('button');
           btn.type = 'button';
           const clickable = p.status !== 'queued' && p.status !== 'processing';
           btn.title = `${p.folderName} — ${meta.label}${p.error ? ' ('+p.error+')' : ''}`;
-          btn.style.cssText = `aspect-ratio:1;border-radius:6px;border:1px solid ${meta.color};background:${meta.bg};color:${meta.color};font-family:var(--mono);font-weight:800;font-size:13px;cursor:${clickable?'pointer':'default'};opacity:${clickable?'1':'0.6'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:2px;`;
+          btn.style.cssText = `width:100%;height:100%;border-radius:6px;border:1px solid ${meta.color};background:${meta.bg};color:${meta.color};font-family:var(--mono);font-weight:800;font-size:13px;cursor:${clickable?'pointer':'default'};opacity:${clickable?'1':'0.6'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:2px;`;
           btn.innerHTML = `<span>#${p.order}</span><span style="font-size:8px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;">${p.status==='processing'?'…':meta.label}</span>`;
           if(p.status === 'error'){
             btn.addEventListener('click', ()=> showErrorPanel(p));
           } else if(clickable){
             btn.addEventListener('click', ()=>openReview(p.id));
           }
-          batchGrid.appendChild(btn);
+          wrap.appendChild(btn);
+
+          // Sync log corner button — shows the EXACT same "Synced — N/N captions
+          // force-aligned…" summary + per-caption breakdown the manual "Sync captions
+          // to voice timing" button produces, replayed from what the unattended
+          // pipeline actually got for this pack. Present whenever prep ran sync at
+          // all for this pack, regardless of whether the pack went on to fail later
+          // (render/save) — the sync result itself is still worth seeing.
+          if(p.syncLog){
+            const logBtn = document.createElement('button');
+            logBtn.type = 'button';
+            logBtn.title = 'View caption sync log for this pack';
+            logBtn.textContent = '📝';
+            logBtn.style.cssText = 'position:absolute;top:2px;right:2px;width:18px;height:18px;line-height:16px;padding:0;border-radius:3px;border:1px solid rgba(242,240,230,0.35);background:rgba(0,0,0,0.55);color:var(--paper);font-size:10px;cursor:pointer;';
+            logBtn.addEventListener('click', (e)=>{ e.stopPropagation(); showSyncLogPanel(p); });
+            wrap.appendChild(logBtn);
+          }
+
+          batchGrid.appendChild(wrap);
         });
+      }
+
+      // Renders the stored per-pack sync log (captured during headless prep) in the
+      // exact same format the visible editor shows after a manual "Sync captions to
+      // voice timing" click — same summary line, same colored per-caption list — so
+      // the person can confirm every pack actually got full, high-quality sync and not
+      // some silently-degraded pass.
+      function showSyncLogPanel(p){
+        batchErrorPanel.style.display = 'none';
+        const log = p.syncLog;
+        if(!log){ batchSyncLogPanel.style.display = 'none'; return; }
+        const retriedTxt = log.retried ? ' <span style="opacity:.6;">(auto-retried once — first pass had a tight gap)</span>' : '';
+        batchSyncLogPanel.style.display = 'block';
+        batchSyncLogPanel.innerHTML = `<b>Pack #${p.order} (${p.folderName}) — caption sync log:</b>${retriedTxt}<br>`
+          + `<div style="margin:6px 0;">${log.summaryText || ''}</div>`
+          + `<div>${log.breakdownHtml || '<span style="opacity:.6;">No per-caption breakdown recorded.</span>'}</div>`
+          + `<button type="button" id="syncLogCloseBtn" style="margin-top:8px;font-family:var(--mono);font-size:10px;padding:4px 8px;cursor:pointer;">Close</button>`;
+        const closeBtn = document.getElementById('syncLogCloseBtn');
+        if(closeBtn) closeBtn.addEventListener('click', ()=>{ batchSyncLogPanel.style.display = 'none'; });
       }
 
       // Tapping an errored tile has no hover on mobile, so the stage+message stored
       // in p.error (set from PREP_PACK_DONE / the note field) was invisible there —
       // this surfaces it inline with a Retry (re-queue) and an Open editor escape hatch.
       function showErrorPanel(p){
+        batchSyncLogPanel.style.display = 'none';
         batchErrorPanel.style.display = 'block';
         const stageTxt = p.stage ? ` at step "${stageLabel(p.stage)}"` : '';
         batchErrorPanel.innerHTML = `<b>Pack #${p.order} (${p.folderName}) failed${stageTxt}:</b><br>${p.error || 'No error message was recorded.'}<br><br>`
@@ -6905,7 +7110,10 @@ window.addEventListener('message', async (ev)=>{
 
       (async function runPrep(){
         const speed = +(urlParams.get('speed')) || 1.12;
-        let status = 'error', note = null, matchInfo = null;
+        // Live per-pack override from the batch panel's checkbox at the moment this pack
+        // started (see runPrepQueue) — defaults to on (matches the manual editor's default).
+        useAvsyncRefine = urlParams.get('avsync') !== '0';
+        let status = 'error', note = null, matchInfo = null, syncLog = null;
         try{
           setStage('manifest');
           const rec = await idbGet('batchPacks', embeddedPackId);
@@ -6949,6 +7157,7 @@ window.addEventListener('message', async (ev)=>{
             } else {
               setStage('sync');
               let syncResult = await performVoiceSync();
+              let syncRetried = false;
               // A clamped gap is the exact same "tighter than the audio needed" warning
               // shown in the visible editor — the thing a person notices and fixes by
               // just clicking Sync again (a fresh Groq call can land better timestamps;
@@ -6956,10 +7165,21 @@ window.addEventListener('message', async (ev)=>{
               // way to see that warning before, so it kept the first, occasionally-noisy
               // result. Do exactly what a manual re-click does: one retry with a fresh
               // transcript (not the cached one) whenever the first pass was flagged.
-              if(syncResult.ok && syncResult.clampedGaps > 0){
+              //
+              // FIX: this used to ONLY retry on clampedGaps>0, which is the warning for
+              // UNMATCHED/estimated captions whose gap got squeezed too tight. A caption
+              // that DID match its own words perfectly but landed a below-par match (a
+              // single-word anchor, or fewer than its full word count matched) never set
+              // clampedGaps at all, so the pipeline silently kept a lower-quality first
+              // pass instead of doing what re-clicking Sync by hand actually does. Also
+              // retry whenever the match rate itself wasn't clean, so the unattended
+              // pipeline applies the same "hit Sync until it's clean" quality bar a
+              // person applies manually, not a lighter one.
+              const isWeakSync = (r) => r.ok && (r.clampedGaps > 0 || r.matched < r.total);
+              if(isWeakSync(syncResult)){
                 cachedTranscript = null;
                 const retryResult = await performVoiceSync();
-                if(retryResult.ok) syncResult = retryResult;
+                if(retryResult.ok){ syncResult = retryResult; syncRetried = true; }
               }
               if(!syncResult.ok){
                 status = 'error'; note = syncResult.message || 'Sync failed.';
@@ -6967,8 +7187,24 @@ window.addEventListener('message', async (ev)=>{
                 status = 'ready_for_review';
                 if(syncResult.clampedGaps > 0){
                   note = `Synced, but ${syncResult.clampedGaps} caption gap(s) were tighter than the spoken audio even after a retry — double-check timing in review.`;
+                } else if(syncResult.matched < syncResult.total){
+                  note = `Synced, but only ${syncResult.matched}/${syncResult.total} captions force-aligned even after a retry — the rest were estimated. Double-check timing in review.`;
                 }
               }
+              // Snapshot the EXACT same feedback the manual "Sync captions to voice
+              // timing" button shows (syncStatus text + syncBreakdown per-caption list),
+              // straight off the real DOM these headless calls still write to — this is
+              // the full sync log the person can open per-pack from the grid.
+              syncLog = {
+                summaryText: syncStatus.textContent,
+                breakdownHtml: syncBreakdown.innerHTML,
+                matched: syncResult.matched,
+                total: syncResult.total,
+                clampedGaps: syncResult.clampedGaps,
+                missed: syncResult.missed,
+                retried: syncRetried,
+                ts: Date.now()
+              };
             }
           }
         } catch(err){
@@ -7013,8 +7249,18 @@ window.addEventListener('message', async (ev)=>{
           }
         }
 
+        // Persist the sync log directly on this pack's record too (belt-and-suspenders
+        // alongside the postMessage below) so it survives even if the parent tab was
+        // closed/reloaded mid-batch and only picks packs back up from IndexedDB.
+        if(syncLog){
+          try{
+            const recNow = await idbGet('batchPacks', embeddedPackId);
+            if(recNow){ recNow.syncLog = syncLog; await idbPut('batchPacks', recNow); }
+          } catch(err){ console.error('saving sync log failed', err); }
+        }
+
         clearInterval(heartbeatTimer);
-        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo, stage: currentStage }, '*');
+        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo, stage: currentStage, syncLog }, '*');
       })();
     }
 
