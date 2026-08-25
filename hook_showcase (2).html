@@ -2128,7 +2128,20 @@
       const limit = Math.min(words.length, p + SKIP_BUDGET);
       let found = -1;
       for(let k=p;k<limit;k++){
-        if(syncWordsMatch(tok, syncNormWord(words[k].word))){ found = k; break; }
+        const w = syncNormWord(words[k].word);
+        // The very first word we successfully anchor on becomes this caption's START
+        // TIMESTAMP (idxs[0]) — require an EXACT hit for it. The fuzzy/prefix tolerance
+        // in syncWordsMatch (meant for plurals/tense on already-confirmed words) was
+        // letting a generic filler word elsewhere in the script — e.g. "smooth" said as
+        // a descriptor for an earlier product — falsely anchor a LATER caption like
+        // "Fondant Smoother" way too early ("smoother".startsWith("smooth")). That's
+        // exactly what made images run ahead of the voice-over on some scripts: one
+        // false-early anchor, and everything after it drifts forward with it. Once we
+        // have at least one confirmed word, later tokens in the same caption can still
+        // use the fuzzy match — those only extend/confirm the match, they don't move
+        // the start time.
+        const isMatch = matchedIdxs.length===0 ? (tok===w) : syncWordsMatch(tok, w);
+        if(isMatch){ found = k; break; }
       }
       if(found === -1) continue; // this token wasn't found nearby — skip it, don't lose the rest
       matchedIdxs.push(found);
@@ -2145,10 +2158,19 @@
     if(!audioFile){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Add an MP3 first.'; return { ok:false, message:'Add an MP3 first.' }; }
     const capTokensList = captions.map(c => (c||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean));
     if(capTokensList.every(t => t.length===0)){ syncStatus.style.color = '#e0866a'; syncStatus.textContent = 'Fill in the captions first — sync matches their words to the voice-over.'; return { ok:false, message:'Fill in the captions first.' }; }
+    // hook flash line + card line are also spoken in the voice-over but were never
+    // force-aligned — pass 2 used their CONFIGURED durations (hookDur*N, cardDur) as if
+    // that were real audio time. Whenever the actual spoken line ran longer/shorter than
+    // that guess, the leftover time got silently dumped onto whichever caption sat next
+    // to that gap (image 1 right after the hook, image 5 around the card). Tokenize them
+    // here so pass 1 can locate their real spoken span too.
+    const hookToks = (hookCaptionText||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean);
+    const cardToks = (cardTextInput.value||'').trim().split(/\s+/).filter(Boolean).map(syncNormWord).filter(Boolean);
 
     syncVoiceBtn.disabled = true;
     syncStatus.style.color = '';
     syncStatus.textContent = 'Transcribing with Whisper…';
+    tabKeepAlive.start();
     try{
       // Transcribe the ORIGINAL, un-stretched upload whenever one exists — WSOLA time-stretch
       // (used by the speed changer) can smear consonants enough to hurt Whisper's accuracy at
@@ -2166,17 +2188,44 @@
       }
       const totalDur = words[words.length-1].end;
 
-      // pass 1 — force-align each caption's own text to where it's actually spoken
+      // pass 1 — force-align each caption's own text to where it's actually spoken.
+      // The hook line is matched first (it's spoken before anything else), and the card
+      // line is matched in its correct spoken position — right before whichever image
+      // sits at cardPos — so both share the same forward-only pointer as the product
+      // captions and never get skipped or matched out of order.
       syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
       let pointer = 0;
+      let hookMatch = null, cardMatch = null;
+      if(hookToks.length){
+        const hIdxs = syncAlignCaption(hookToks, words, pointer);
+        if(hIdxs){
+          hookMatch = { start: words[hIdxs[0]].start, end: words[hIdxs[hIdxs.length-1]].end };
+          pointer = hIdxs[hIdxs.length-1] + 1;
+        }
+      }
       const matches = new Array(N).fill(null); // {start,end,matchedIdxs} | null
       for(let i=0;i<N;i++){
+        if(i === cardPos && cardToks.length && !cardMatch){
+          const cIdxs = syncAlignCaption(cardToks, words, pointer);
+          if(cIdxs){
+            cardMatch = { start: words[cIdxs[0]].start, end: words[cIdxs[cIdxs.length-1]].end };
+            pointer = cIdxs[cIdxs.length-1] + 1;
+          }
+        }
         const toks = capTokensList[i];
         if(!toks.length) continue;
         const idxs = syncAlignCaption(toks, words, pointer);
         if(idxs){
           matches[i] = { start: words[idxs[0]].start, end: words[idxs[idxs.length-1]].end, hitCount: idxs.length, tokCount: toks.length };
           pointer = idxs[idxs.length-1] + 1;
+        }
+      }
+      // card sits after the very last image (cardPos === N) — never hit inside the loop above
+      if(cardPos >= N && cardToks.length && !cardMatch){
+        const cIdxs = syncAlignCaption(cardToks, words, pointer);
+        if(cIdxs){
+          cardMatch = { start: words[cIdxs[0]].start, end: words[cIdxs[cIdxs.length-1]].end };
+          pointer = cIdxs[cIdxs.length-1] + 1;
         }
       }
 
@@ -2243,8 +2292,36 @@
       // made images run early/late before. This solves for the exact absolute time at
       // every matched anchor and only estimates the gaps in between (unmatched captions),
       // weighted by word count, instead of quietly ignoring the hook/card offset.
-      const fixedOffsetBefore = (i) => N*hookDur + (cardPos <= i ? cardDur : 0); // i in [0..N]
-      const cardBetween = (a,b) => (cardPos > a && cardPos <= b) ? cardDur : 0;
+      // Use the REAL measured spoken span for the hook/card line when we found one —
+      // that's in the same absolute-audio-time frame as every matched caption anchor.
+      // Only fall back to the configured hookDur*N / cardDur guess when that line
+      // couldn't be matched at all (e.g. hook/card text field left empty or edited
+      // away from what's actually spoken).
+      const hookRealEnd = hookMatch ? hookMatch.end : null;
+      const cardRealSpan = cardMatch ? (cardMatch.end - cardMatch.start) : null;
+
+      // CRITICAL: the lines above only make the DURATION MATH consistent with reality —
+      // they don't change what actually plays on screen. hookDur/cardDur are the real
+      // segment lengths the renderer/exporter uses for the hook-flash montage and the
+      // card. If those stay at their old configured values while pass 2 assumes the
+      // measured real length, the video and audio agree on paper but disagree on
+      // screen: the hook/card segment still plays for the OLD (usually shorter)
+      // duration, so every image after it starts early and runs ahead of the voice-over
+      // for the rest of the video. So actually stretch hookDur/cardDur to match what was
+      // really spoken (clamped to each field's own allowed range), and update their UI
+      // inputs the same way a manual edit would, so the change actually takes effect.
+      if(hookMatch){
+        const measuredHookPerFlash = Math.max(0.1, Math.min(1, (hookMatch.end - hookMatch.start) / N));
+        hookDur = measuredHookPerFlash;
+        hookDurRange.value = hookDur; hookDurNum.value = hookDur.toFixed(2);
+      }
+      if(cardMatch){
+        const measuredCardDur = Math.max(1, Math.min(10, cardRealSpan));
+        cardDur = measuredCardDur;
+        cardDurRange.value = cardDur; cardDurNum.value = cardDur.toFixed(2);
+      }
+      const fixedOffsetBefore = (i) => (hookRealEnd !== null ? hookRealEnd : N*hookDur) + (cardPos <= i ? (cardRealSpan !== null ? cardRealSpan : cardDur) : 0); // i in [0..N]
+      const cardBetween = (a,b) => (cardPos > a && cardPos <= b) ? (cardRealSpan !== null ? cardRealSpan : cardDur) : 0;
 
       // boundaries: a virtual start (t = however long hook/card play before image 0),
       // every matched caption (t = its own detected speech start), and a virtual end
@@ -2295,21 +2372,30 @@
       capList.querySelectorAll('.capDur').forEach(inp=>{
         inp.value = showDur[+inp.dataset.i].toFixed(1);
       });
-      drawPreviewFrame(0);
+      refreshAll();
       const missed = capTokensList.filter(t=>t.length).length - matchedIdxs.length;
       syncStatus.style.color = clampedGaps>0 ? '#e0a94a' : '#8fd19e';
-      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}`;
+      const hookCardNote = (hookToks.length || cardToks.length)
+        ? ` Hook line: ${hookMatch ? `aligned, segment stretched to ${(hookDur*N).toFixed(2)}s to match` : (hookToks.length ? 'not found in audio' : 'empty')}. Card line: ${cardMatch ? `aligned, segment stretched to ${cardDur.toFixed(2)}s to match` : (cardToks.length ? 'not found in audio' : 'empty')}.`
+        : '';
+      syncStatus.textContent = `Synced — ${matchedIdxs.length}/${capTokensList.filter(t=>t.length).length} captions force-aligned to the voice-over${missed>0 ? `, ${missed} estimated from timing around them` : ''}.${clampedGaps>0 ? ` Heads up: ${clampedGaps} gap(s) were tighter than the spoken audio needed — your hook/card duration may be eating into the voice-over; try shortening hookDur/cardDur and re-syncing.` : ''}${hookCardNote}`;
       syncBreakdown.style.display = 'block';
-      syncBreakdown.innerHTML = rows.sort((a,b)=>a.i-b.i).map(r =>
+      const hookCardRows = [
+        hookToks.length ? `<div>Hook line — "${(hookCaptionText||'').trim().slice(0,40)}" — <span style="color:${hookMatch ? 'var(--green-bright)' : '#e0866a'};">${hookMatch ? (hookRealEnd-hookMatch.start).toFixed(2)+'s spoken' : 'not matched'}</span></div>` : '',
+        cardToks.length ? `<div>Card line — "${(cardTextInput.value||'').trim().slice(0,40)}" — <span style="color:${cardMatch ? 'var(--green-bright)' : '#e0866a'};">${cardMatch ? cardRealSpan.toFixed(2)+'s spoken' : 'not matched'}</span></div>` : ''
+      ].filter(Boolean).join('');
+      syncBreakdown.innerHTML = hookCardRows + rows.sort((a,b)=>a.i-b.i).map(r =>
         `<div>Caption ${r.i+1} — "${r.text}" — <span style="color:${r.matched ? (r.singleWord ? '#8fc7d1' : 'var(--green-bright)') : '#e0a94a'};">${r.dur.toFixed(2)}s</span>${r.matched ? (r.singleWord ? ' <span style="opacity:.6;">(anchored on 1 word)</span>' : '') : ' <span style="opacity:.6;">(estimated)</span>'}</div>`
       ).join('');
       syncVoiceBtn.disabled = false;
+      tabKeepAlive.stop();
       return { ok:true, matched: matchedIdxs.length, total: capTokensList.filter(t=>t.length).length, clampedGaps, missed };
     } catch(err){
       console.error(err);
       syncStatus.style.color = '#e0866a';
       syncStatus.textContent = err.message || 'Sync failed.';
       syncVoiceBtn.disabled = false;
+      tabKeepAlive.stop();
       return { ok:false, message: err.message || 'Sync failed.' };
     }
   }
@@ -5358,6 +5444,7 @@
     const fps = 30;
     const setPct = pct=>{ genFill.style.width = pct+'%'; genPct.textContent = pct+'%'; if(opts.onRenderProgress) opts.onRenderProgress(pct); };
 
+    tabKeepAlive.start(); // exempt this tab from background throttling for the whole render
     let finalBlob = null, filename = currentPackFilename || 'hook-showcase.mp4';
     try{
       if(webCodecsSupported()){
@@ -5375,8 +5462,10 @@
       genBtn.disabled = false;
       genBtn.textContent = 'Generate video';
       drawPreviewFrame(0);
+      tabKeepAlive.stop();
       return { ok:false, message: (err && err.message) || 'Export failed.' };
     }
+    tabKeepAlive.stop();
 
     // LEAK FIX: every previous export's blob URL (and the full mp4 ArrayBuffer/Blob it
     // keeps alive) used to stay referenced by dlLink.href for the rest of the session,
@@ -6089,7 +6178,42 @@ Reply with ONLY JSON. No prose, no markdown.`;
   // ================= END VOICE CONTROL LAYER =================
 
 
-  // ================= BULK PACK BATCH PROCESSING (v2) =================
+  // ================= BACKGROUND-TAB KEEPALIVE =================
+  // Chrome (and other Chromium browsers) heavily throttle setTimeout/setInterval/
+  // postMessage-driven work on a tab the instant it's not the active tab — that's
+  // exactly what turned into "no heartbeat for 45s" / stuck rendering / pack #7
+  // erroring the moment the user switched to YouTube or WhatsApp. The one thing
+  // Chrome exempts from that throttling is a tab that's actively outputting audio.
+  // So for the duration of any auto-prepare batch run or export, we play a
+  // real (but effectively silent, -80dB) looping tone. It costs nothing audible
+  // and keeps every timer/heartbeat/render loop running at full speed in the
+  // background instead of getting clamped to ~1 tick/second.
+  const tabKeepAlive = (function(){
+    let ctx = null, osc = null, gainNode = null, refCount = 0;
+    function start(){
+      refCount++;
+      if(ctx) return;
+      try{
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode = ctx.createGain();
+        gainNode.gain.value = 0.00001; // inaudible, but non-zero so Chrome treats the tab as playing audio
+        osc = ctx.createOscillator();
+        osc.frequency.value = 20000; // also outside audible range as a second safety margin
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        osc.start();
+      } catch(e){ console.warn('[keepalive] could not start silent audio track', e); }
+    }
+    function stop(){
+      refCount = Math.max(0, refCount-1);
+      if(refCount > 0) return;
+      try{ osc && osc.stop(); ctx && ctx.close(); } catch(e){}
+      osc = null; gainNode = null; ctx = null;
+    }
+    return { start, stop };
+  })();
+
+
   // Three roles for this same file, switched by URL params:
   //  - normal (no ?embedded): the bulk uploader + orchestrator. Ingests every
   //    pack folder at once into IndexedDB (batchPacks), then drives ONE hidden
@@ -6495,13 +6619,25 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
       batchGenerateBtn.addEventListener('click', ()=>{
         if(!currentPacks.length){ setIngestStatus('Select a packs folder first.', false); return; }
-        // Start = process EVERYTHING not already rendered. 'ready_for_review' is
-        // included on purpose: prep used to stop there and wait for someone to open
-        // each pack by hand before it would actually render — packs left sitting in
-        // that state (from before auto-render, or from a tab closing mid-render) would
-        // otherwise silently never get picked back up by a fresh "Start auto-prepare".
-        const todo = currentPacks.filter(p => p.status !== 'done' && p.status !== 'rendering' && p.status !== 'processing');
-        if(!todo.length){ batchPrepStatus.textContent = 'Every pack is already done.'; return; }
+        // Start = process EVERYTHING not already rendered AT THE CURRENTLY ENTERED SPEED.
+        // 'ready_for_review' is included on purpose: prep used to stop there and wait for
+        // someone to open each pack by hand before it would actually render — packs left
+        // sitting in that state (from before auto-render, or from a tab closing mid-render)
+        // would otherwise silently never get picked back up by a fresh "Start auto-prepare".
+        // A 'done' pack is ALSO re-queued if the speed box no longer matches the speed it
+        // was actually prepared at — otherwise changing the speed after a batch finished and
+        // clicking Start again would silently leave every already-done pack on its old
+        // speed, which is exactly "the speed I enter doesn't apply to the whole batch".
+        const currentSpeed = +batchSpeedInput.value || 1.12;
+        const todo = currentPacks.filter(p => {
+          if(p.status === 'rendering' || p.status === 'processing') return false; // already in flight, leave it alone
+          if(p.status === 'done'){
+            const prevSpeed = p.matchInfo && typeof p.matchInfo.speed === 'number' ? p.matchInfo.speed : null;
+            return prevSpeed === null || Math.abs(prevSpeed - currentSpeed) > 0.001;
+          }
+          return true;
+        });
+        if(!todo.length){ batchPrepStatus.textContent = `Every pack is already done at ${currentSpeed.toFixed(2)}x.`; return; }
         startPrep(todo.map(p=>p.id));
       });
 
@@ -6522,6 +6658,8 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
       async function runPrepQueue(){
         prepRunning = true;
+        tabKeepAlive.start(); // keep this tab exempt from background throttling for the whole run
+        try{
         let doneCount = currentPacks.filter(p=>p.status==='ready_for_review'||p.status==='done'||p.status==='no_match').length;
         const total = currentPacks.length;
         while(prepQueue.length){
@@ -6599,8 +6737,13 @@ Reply with ONLY JSON. No prose, no markdown.`;
           renderGrid(); renderBatchSummary();
         }
         prepRunning = false;
+        tabKeepAlive.stop();
         batchPrepStatus.textContent = `Auto-prepare complete — ${doneCount}/${total} pack(s) processed. Open the grid to review.`;
         batchPrepIframe.removeAttribute('src');
+        } finally {
+          prepRunning = false;
+          tabKeepAlive.stop();
+        }
       }
 
       window.addEventListener('message', (ev)=>{
@@ -6909,6 +7052,7 @@ window.addEventListener('message', async (ev)=>{
         parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
       }, 4000);
       parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
+      tabKeepAlive.start(); // belt-and-suspenders: this iframe does the actual heavy work (sync + render)
 
       let currentStage = null;
       function setStage(key, pct){
@@ -7064,6 +7208,7 @@ window.addEventListener('message', async (ev)=>{
         }
 
         clearInterval(heartbeatTimer);
+        tabKeepAlive.stop();
         parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo, stage: currentStage, syncLog }, '*');
       })();
     }
