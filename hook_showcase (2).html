@@ -1947,7 +1947,33 @@
 
   async function timeStretchAudioBuffer(audioBuffer, speed){
     const { SoundTouch, SimpleFilter, WebAudioBufferSource } = await loadSoundTouch();
-    const source = new WebAudioBufferSource(audioBuffer);
+    // BUGFIX (root cause of "last 2-3 seconds of the voice-over gets cut off"):
+    // SoundTouch's TDStretch/RateTransposer pipeline holds several thousand samples of
+    // internal lookahead buffer for its overlap-add windowing. WebAudioBufferSource.extract
+    // returns 0 the instant it runs out of real input, and the loop below stopped the moment
+    // that happened — but at that point the pipeline still had real, unprocessed tail audio
+    // sitting in its internal buffers that had never been pushed out through extract(). That
+    // buffered tail (typically a couple of seconds, worse at faster tempos) was silently
+    // dropped instead of flushed, which is exactly why the END of the voice-over — the last
+    // product's line — went missing, on every video, independent of overall video length:
+    // this same function runs on every Auto-Prepare pack via the always-on 1.12x speed step.
+    // Fix: feed the pipeline extra trailing silence so it has enough "input" to fully push
+    // every real sample through its lookahead window, then trim the output back down to the
+    // mathematically correct stretched length (input length / speed) so the silence padding
+    // never ends up audible in the result.
+    const PAD_SECONDS = 3; // generous — comfortably covers SoundTouch's internal buffering
+    const padFrames = Math.ceil(audioBuffer.sampleRate * PAD_SECONDS);
+    const padded = new AudioBuffer({
+      numberOfChannels: audioBuffer.numberOfChannels,
+      length: audioBuffer.length + padFrames,
+      sampleRate: audioBuffer.sampleRate
+    });
+    for(let ch=0; ch<audioBuffer.numberOfChannels; ch++){
+      padded.getChannelData(ch).set(audioBuffer.getChannelData(ch), 0); // rest stays zero-filled (silence)
+    }
+    const expectedFrames = Math.max(1, Math.round(audioBuffer.length / Math.max(0.1, speed)));
+
+    const source = new WebAudioBufferSource(padded);
     const st = new SoundTouch();
     st.tempo = speed; // time-stretch only — pitch left untouched, exactly what "change speed" (not "change pitch") means on mp3cut
     st.pitch = 1;
@@ -1957,20 +1983,24 @@
     const chunk = new Float32Array(CHUNK*2);
     const parts = [];
     let totalFrames = 0;
-    const hardCap = Math.ceil(audioBuffer.length / Math.max(0.1, speed)) + audioBuffer.sampleRate*10; // safety stop
+    // hard cap now sized off the PADDED input so the flush-via-silence above is never cut short
+    const hardCap = Math.ceil(padded.length / Math.max(0.1, speed)) + audioBuffer.sampleRate*2; // safety stop
     while(true){
       const n = filter.extract(chunk, CHUNK);
       if(n <= 0) break;
       parts.push(chunk.slice(0, n*2));
       totalFrames += n;
       if(totalFrames > hardCap) break;
+      // once we've pulled enough frames to cover the real (unpadded) audio, the rest of the
+      // output is just the silence padding working its way through — no need to keep going
+      if(totalFrames >= expectedFrames + Math.ceil(audioBuffer.sampleRate*0.25)) break;
     }
-    const outBuf = new AudioBuffer({ numberOfChannels: 2, length: Math.max(1,totalFrames), sampleRate: audioBuffer.sampleRate });
+    const outBuf = new AudioBuffer({ numberOfChannels: 2, length: Math.max(1, Math.min(totalFrames, expectedFrames)), sampleRate: audioBuffer.sampleRate });
     const L = outBuf.getChannelData(0), R = outBuf.getChannelData(1);
     let offset = 0;
     for(const part of parts){
       const n = part.length/2;
-      for(let i=0;i<n;i++){ L[offset+i] = part[i*2]; R[offset+i] = part[i*2+1]; }
+      for(let i=0;i<n && offset<outBuf.length;i++){ L[offset+i] = part[i*2]; R[offset+i] = part[i*2+1]; }
       offset += n;
     }
     return outBuf;
@@ -7112,8 +7142,8 @@ window.addEventListener('message', async (ev)=>{
               // just clicking Sync again (a fresh Groq call can land better timestamps;
               // that's the whole reason a manual re-click "just works"). Pipeline had no
               // way to see that warning before, so it kept the first, occasionally-noisy
-              // result. Do exactly what a manual re-click does: one retry with a fresh
-              // transcript (not the cached one) whenever the first pass was flagged.
+              // result. Do exactly what a manual re-click does: retry with a fresh
+              // transcript (not the cached one) whenever a pass was flagged.
               //
               // FIX: this used to ONLY retry on clampedGaps>0, which is the warning for
               // UNMATCHED/estimated captions whose gap got squeezed too tight. A caption
@@ -7124,19 +7154,34 @@ window.addEventListener('message', async (ev)=>{
               // retry whenever the match rate itself wasn't clean, so the unattended
               // pipeline applies the same "hit Sync until it's clean" quality bar a
               // person applies manually, not a lighter one.
+              //
+              // FIX (root cause of "10/30 sync perfectly, 20/30 don't"): a real person
+              // doesn't stop after one re-click — they keep hitting Sync until the result
+              // is clean, however many tries that takes. This capped it at exactly ONE
+              // retry, so any pack whose transcript happened to need a 2nd or 3rd fresh
+              // pass to land clean was silently left worse than a pack that got lucky on
+              // its first or second try — same code, same rules, different number of
+              // attempts applied. That's the "inconsistent application" itself. Loop up to
+              // a bounded number of attempts (same as a patient manual user would try) and
+              // keep the best result seen, so every pack gets the same deterministic
+              // "retry until clean, or give it your best bounded shot" treatment.
               const isWeakSync = (r) => r.ok && (r.clampedGaps > 0 || r.matched < r.total);
-              if(isWeakSync(syncResult)){
-                const retryResult = await performVoiceSync();
-                if(retryResult.ok){ syncResult = retryResult; syncRetried = true; }
+              const MAX_SYNC_ATTEMPTS = 4; // 1 initial pass + up to 3 retries, same ceiling a diligent manual re-click session would use
+              let attempts = 1;
+              while(isWeakSync(syncResult) && attempts < MAX_SYNC_ATTEMPTS){
+                syncResult = await performVoiceSync();
+                syncRetried = true;
+                attempts++;
               }
               if(!syncResult.ok){
                 status = 'error'; note = syncResult.message || 'Sync failed.';
               } else {
                 status = 'ready_for_review';
+                const retryNote = attempts > 1 ? ` after ${attempts} attempts` : '';
                 if(syncResult.clampedGaps > 0){
-                  note = `Synced, but ${syncResult.clampedGaps} caption gap(s) were tighter than the spoken audio even after a retry — double-check timing in review.`;
+                  note = `Synced, but ${syncResult.clampedGaps} caption gap(s) were tighter than the spoken audio even${retryNote} — double-check timing in review.`;
                 } else if(syncResult.matched < syncResult.total){
-                  note = `Synced, but only ${syncResult.matched}/${syncResult.total} captions force-aligned even after a retry — the rest were estimated. Double-check timing in review.`;
+                  note = `Synced, but only ${syncResult.matched}/${syncResult.total} captions force-aligned even${retryNote} — the rest were estimated. Double-check timing in review.`;
                 }
               }
               // Snapshot the EXACT same feedback the manual "Sync captions to voice
