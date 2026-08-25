@@ -911,6 +911,7 @@
             </div>
             <div style="font-size:9px;color:rgba(242,240,230,0.5);margin:-4px 0 8px;">Applies to every pack "Start auto-prepare" runs — same audio-verified boundary refinement as the manual Sync button.</div>
             <button type="button" id="batchGenerateBtn" style="width:100%;background:var(--green-bright);color:#06120b;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-weight:800;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;margin-bottom:6px;">▶ Start auto-prepare</button>
+            <div id="batchTimerBadge" style="display:none;font-size:10px;font-family:var(--mono);font-weight:800;text-align:center;background:#0e120f;border:1px solid var(--green-bright);color:var(--green-bright);border-radius:4px;padding:6px;margin-bottom:6px;letter-spacing:0.03em;"></div>
             <div id="batchPrepStatus" style="font-size:9.5px;margin-bottom:4px;min-height:12px;color:var(--green-bright);"></div>
             <div id="batchStageDetail" style="font-size:9px;margin-bottom:8px;min-height:11px;color:rgba(242,240,230,0.5);font-family:var(--mono);"></div>
             <div style="border:1px solid var(--line);border-radius:4px;padding:8px;margin-bottom:8px;">
@@ -2049,7 +2050,24 @@
       try{
         decoded = await tmpCtx.decodeAudioData(await originalAudioFile.arrayBuffer());
       } finally { try{ tmpCtx.close(); }catch(e){} }
-      const stretched = await timeStretchAudioBuffer(decoded, speed);
+      let stretched, pitchPreserved = true;
+      const expectedLen = Math.max(1, Math.round(decoded.length / Math.max(0.1, speed)));
+      try{
+        stretched = await timeStretchAudioBuffer(decoded, speed);
+      } catch(err){
+        // FALLBACK: only reached if the WSOLA library actually failed to load/run
+        // (threw). Guarantees the speed still changes — pitch shifts slightly, but
+        // that's better than silently staying at normal speed.
+        console.error('pitch-preserving stretch failed, falling back to playbackRate resample', err);
+        pitchPreserved = false;
+        const offline = new OfflineAudioContext(decoded.numberOfChannels, expectedLen, decoded.sampleRate);
+        const src = offline.createBufferSource();
+        src.buffer = decoded;
+        src.playbackRate.value = speed;
+        src.connect(offline.destination);
+        src.start(0);
+        stretched = await offline.startRendering();
+      }
       const blob = audioBufferToWavBlob(stretched);
       const baseName = (originalAudioFile.name||'voiceover').replace(/\.[^.]+$/,'');
       const newFile = new File([blob], `${baseName}-${speed.toFixed(2)}x.wav`, {type:'audio/wav'});
@@ -2062,10 +2080,12 @@
       previewAudioUrl = URL.createObjectURL(newFile);
       previewAudio.src = previewAudioUrl;
       voiceSpeedResetBtn.style.display = Math.abs(speed-1) < 0.005 ? 'none' : 'inline-block';
-      voiceSpeedStatus.style.color = '#8fd19e';
-      voiceSpeedStatus.textContent = `Done — voice-over is now ${speed.toFixed(2)}x speed, pitch unchanged.`;
+      voiceSpeedStatus.style.color = pitchPreserved ? '#8fd19e' : '#e0c14a';
+      voiceSpeedStatus.textContent = pitchPreserved
+        ? `Done — voice-over is now ${speed.toFixed(2)}x speed, pitch unchanged.`
+        : `Done — voice-over is now ${speed.toFixed(2)}x speed (pitch-preserving library failed, used a plain resample — pitch shifted slightly).`;
       await saveTemplateToStorage();
-      return { ok:true, speed };
+      return { ok:true, speed, pitchPreserved };
     } catch(err){
       console.error(err);
       voiceSpeedStatus.style.color = '#e0866a';
@@ -2151,11 +2171,21 @@
   // or after `startAt` — skipping any spoken filler words in between that aren't part of
   // the caption (that's what makes this real alignment instead of a word counter).
   function syncAlignCaption(capTokens, words, startAt){
-    const SKIP_BUDGET = 60; // how far ahead (in transcript words) to look for each token
+    const SKIP_BUDGET = 60; // how far ahead (in transcript words) to look for the FIRST (anchor) token only
+    // Continuation tokens (after the anchor) belong to the same short spoken phrase as
+    // the anchor — they should sit within a handful of words of it, not 60 words away.
+    // A wide budget here let a fuzzy continuation match skip past real silence/gaps and
+    // land on an unrelated word deep in a LATER caption (e.g. the hook line's last token
+    // fuzzy-matching a word inside the product name that gets spoken after it), which
+    // pushed that caption's END timestamp way out — the hook flash kept playing long
+    // after the voice-over had already moved on to the next line. Tight budget keeps
+    // continuation matches inside the actual phrase.
+    const CONTINUATION_SKIP_BUDGET = 6;
     let p = startAt;
     const matchedIdxs = [];
     for(const tok of capTokens){
-      const limit = Math.min(words.length, p + SKIP_BUDGET);
+      const budget = matchedIdxs.length===0 ? SKIP_BUDGET : CONTINUATION_SKIP_BUDGET;
+      const limit = Math.min(words.length, p + budget);
       let found = -1;
       for(let k=p;k<limit;k++){
         const w = syncNormWord(words[k].word);
@@ -2180,6 +2210,75 @@
     const minNeeded = Math.max(1, Math.ceil(capTokens.length*0.34));
     if(matchedIdxs.length < minNeeded) return null;
     return matchedIdxs;
+  }
+
+  // Global forced alignment (Needleman-Wunsch style) — the "real" fix for hook/caption
+  // matches drifting onto unrelated later words. Instead of matching each caption
+  // independently with a local skip-window (syncAlignCaption above, still used as the
+  // pass-1.5 single-word fallback), this aligns the ENTIRE script — hook, then each
+  // image caption in spoken order, with the card slotted at its real position — against
+  // the ENTIRE transcript in one shot. Because it's a single monotonic global alignment,
+  // a token can never "jump ahead" past real intervening speech the way a per-caption
+  // local search could: every matched pair has to fit the same left-to-right order as
+  // everything else, and skipping any script or transcript word costs a small penalty
+  // the algorithm only pays when it truly can't align. This is the same idea real
+  // forced-alignment tools (Gentle, WhisperX/ctc-forced-aligner, aeneas) use; those need
+  // a server-side install, so this reimplements the core DP in-browser instead.
+  function globalAlignScript(units, words){
+    // units: ordered list of {owner, toks:[normWord,...]}. Flatten to one token stream,
+    // remembering which unit (and which token within it) each entry belongs to.
+    const S = [];
+    units.forEach((u, ui) => u.toks.forEach((tok, ti) => S.push({ tok, ui, ti })));
+    const W = words.map(w => syncNormWord(w.word));
+    const K = S.length, M = W.length;
+    if(!K || !M) return units.map(()=>null);
+
+    const NEG = -1e9;
+    const GAP_S = 0.6;   // cost of leaving a script token unmatched (mishear/skip)
+    const GAP_W = 0.15;  // cost of leaving a transcript word unmatched (filler/extra word)
+    function matchScore(a,b){
+      if(a === b) return 3;
+      if(syncWordsMatch(a,b)) return 1;
+      return NEG;
+    }
+
+    // Rolling two-row DP (score only) + full backpointer grid (direction only, 1 byte/cell)
+    // to keep memory sane even for long scripts/transcripts.
+    const DIAG=0, UP=1, LEFT=2;
+    const bp = new Uint8Array((K+1) * (M+1));
+    let prev = new Float64Array(M+1);
+    for(let j=1;j<=M;j++){ prev[j] = -j*GAP_W; bp[j] = LEFT; }
+    for(let i=1;i<=K;i++){
+      const cur = new Float64Array(M+1);
+      cur[0] = -i*GAP_S; bp[i*(M+1)] = UP;
+      const tok = S[i-1].tok;
+      for(let j=1;j<=M;j++){
+        const diagScore = matchScore(tok, W[j-1]);
+        const diag = diagScore > NEG/2 ? prev[j-1] + diagScore : NEG;
+        const up = prev[j] - GAP_S;
+        const left = cur[j-1] - GAP_W;
+        let best = diag, dir = DIAG;
+        if(up > best){ best = up; dir = UP; }
+        if(left > best){ best = left; dir = LEFT; }
+        cur[j] = best;
+        bp[i*(M+1)+j] = dir;
+      }
+      prev = cur;
+    }
+
+    // Backtrack, collecting matched (script-token, transcript-word) pairs.
+    const perUnit = units.map(()=>[]); // matched transcript word indices, per unit, in order
+    let i = K, j = M;
+    while(i>0 || j>0){
+      const dir = i>0 && j>0 ? bp[i*(M+1)+j] : (i>0 ? UP : LEFT);
+      if(dir === DIAG){
+        const s = S[i-1];
+        if(matchScore(s.tok, W[j-1]) > NEG/2) perUnit[s.ui].push(j-1);
+        i--; j--;
+      } else if(dir === UP){ i--; }
+      else { j--; }
+    }
+    return perUnit.map(idxs => idxs.length ? idxs.sort((a,b)=>a-b) : null);
   }
 
   async function performVoiceSync(){
@@ -2218,46 +2317,30 @@
       }
       const totalDur = words[words.length-1].end;
 
-      // pass 1 — force-align each caption's own text to where it's actually spoken.
-      // The hook line is matched first (it's spoken before anything else), and the card
-      // line is matched in its correct spoken position — right before whichever image
-      // sits at cardPos — so both share the same forward-only pointer as the product
-      // captions and never get skipped or matched out of order.
+      // pass 1 — force-align the WHOLE script (hook, then each image caption in spoken
+      // order, card slotted at its real position) against the WHOLE transcript in one
+      // global alignment. See globalAlignScript above for why this replaced the old
+      // per-caption local-window search.
       syncStatus.textContent = 'Aligning captions to the words that were actually spoken…';
-      let pointer = 0;
-      let hookMatch = null, cardMatch = null;
-      if(hookToks.length){
-        const hIdxs = syncAlignCaption(hookToks, words, pointer);
-        if(hIdxs){
-          hookMatch = { start: words[hIdxs[0]].start, end: words[hIdxs[hIdxs.length-1]].end };
-          pointer = hIdxs[hIdxs.length-1] + 1;
-        }
-      }
-      const matches = new Array(N).fill(null); // {start,end,matchedIdxs} | null
+      const units = [];
+      if(hookToks.length) units.push({ owner:'hook', toks:hookToks });
       for(let i=0;i<N;i++){
-        if(i === cardPos && cardToks.length && !cardMatch){
-          const cIdxs = syncAlignCaption(cardToks, words, pointer);
-          if(cIdxs){
-            cardMatch = { start: words[cIdxs[0]].start, end: words[cIdxs[cIdxs.length-1]].end };
-            pointer = cIdxs[cIdxs.length-1] + 1;
-          }
-        }
-        const toks = capTokensList[i];
-        if(!toks.length) continue;
-        const idxs = syncAlignCaption(toks, words, pointer);
-        if(idxs){
-          matches[i] = { start: words[idxs[0]].start, end: words[idxs[idxs.length-1]].end, hitCount: idxs.length, tokCount: toks.length };
-          pointer = idxs[idxs.length-1] + 1;
-        }
+        if(i === cardPos && cardToks.length) units.push({ owner:'card', toks:cardToks });
+        if(capTokensList[i].length) units.push({ owner:i, toks:capTokensList[i] });
       }
-      // card sits after the very last image (cardPos === N) — never hit inside the loop above
-      if(cardPos >= N && cardToks.length && !cardMatch){
-        const cIdxs = syncAlignCaption(cardToks, words, pointer);
-        if(cIdxs){
-          cardMatch = { start: words[cIdxs[0]].start, end: words[cIdxs[cIdxs.length-1]].end };
-          pointer = cIdxs[cIdxs.length-1] + 1;
-        }
-      }
+      if(cardPos >= N && cardToks.length) units.push({ owner:'card', toks:cardToks });
+
+      const aligned = globalAlignScript(units, words); // per-unit array of matched word indices | null
+      let hookMatch = null, cardMatch = null;
+      const matches = new Array(N).fill(null); // {start,end,hitCount,tokCount} | null
+      units.forEach((u, ui) => {
+        const idxs = aligned[ui];
+        if(!idxs) return;
+        const m = { start: words[idxs[0]].start, end: words[idxs[idxs.length-1]].end, hitCount: idxs.length, tokCount: u.toks.length };
+        if(u.owner === 'hook') hookMatch = { start: m.start, end: m.end };
+        else if(u.owner === 'card') cardMatch = { start: m.start, end: m.end };
+        else matches[u.owner] = m;
+      });
 
       // pass 1.5 — single-word fallback for captions that FAILED the main match (paraphrased
       // scripts, mis-heard brand/product names, etc). Rather than letting these fall all the way
@@ -3448,6 +3531,10 @@
     hookCapFontSize = LOCKED_CAPTION_RULES.hook.fontSize;
     hookCaptionPos = { ...LOCKED_CAPTION_RULES.hook.pos };
     hookWordByWord = true;
+    // hookDur intentionally NOT re-pinned here. performVoiceSync measures the
+    // real spoken span for the hook line and stretches hookDur to match (pass 2
+    // above) — that's correct, not a bug. Locking it to a fixed number breaks
+    // audio/image sync whenever the hook line's actual spoken length differs.
 
     capFontSize = LOCKED_CAPTION_RULES.showcase.fontSize;
     captionPos = { ...LOCKED_CAPTION_RULES.showcase.pos };
@@ -6371,10 +6458,55 @@ Reply with ONLY JSON. No prose, no markdown.`;
       const batchListWrap = document.getElementById('batchListWrap');
       const batchListSummary = document.getElementById('batchListSummary');
       const batchSpeedInput = document.getElementById('batchSpeedInput');
+      // BUG FIX: this field had zero persistence — unlike the Groq/Gemini keys and
+      // activeBatchId below, it lived only in this page's live DOM. Any reload (tab
+      // refresh, browser restart, or the auto-resume flow further down reopening this
+      // page) silently reset it back to the hardcoded 1.12 default, with no warning.
+      // Typing 1.16 and then having the tab reload for any reason meant every pack
+      // processed after that reload silently went back to 1.12 — which reads as "normal
+      // speed" next to what was actually intended. Persist + restore so the typed speed
+      // survives exactly like every other saved setting in this tool.
+      const BATCH_SPEED_KEY = 'batchVoiceSpeed';
+      const savedBatchSpeed = localStorage.getItem(BATCH_SPEED_KEY);
+      if(savedBatchSpeed) batchSpeedInput.value = savedBatchSpeed;
+      batchSpeedInput.addEventListener('input', ()=> localStorage.setItem(BATCH_SPEED_KEY, batchSpeedInput.value));
       const batchGenerateBtn = document.getElementById('batchGenerateBtn');
       const batchPrepStatus = document.getElementById('batchPrepStatus');
       const batchStageDetail = document.getElementById('batchStageDetail');
       const batchWorkflowList = document.getElementById('batchWorkflowList');
+      const batchTimerBadge = document.getElementById('batchTimerBadge');
+
+      // ---------- live run timer ----------
+      // Shows elapsed time while a batch runs, then freezes on the final total once
+      // it finishes — so "how long did that take" is answered without doing math on
+      // timestamps in the status log.
+      let batchTimerStart = null, batchTimerInterval = null;
+      function fmtElapsed(ms){
+        const s = Math.floor(ms/1000);
+        const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+        const pad = n => String(n).padStart(2,'0');
+        return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+      }
+      function startBatchTimer(){
+        batchTimerStart = Date.now();
+        batchTimerBadge.style.display = 'block';
+        batchTimerBadge.style.color = 'var(--green-bright)';
+        batchTimerBadge.style.borderColor = 'var(--green-bright)';
+        batchTimerBadge.textContent = '⏱ 0:00 elapsed';
+        clearInterval(batchTimerInterval);
+        batchTimerInterval = setInterval(()=>{
+          batchTimerBadge.textContent = `⏱ ${fmtElapsed(Date.now() - batchTimerStart)} elapsed`;
+        }, 1000);
+      }
+      function stopBatchTimer(){
+        clearInterval(batchTimerInterval);
+        if(batchTimerStart){
+          const total = fmtElapsed(Date.now() - batchTimerStart);
+          batchTimerBadge.textContent = `✓ Done in ${total}`;
+          batchTimerBadge.style.color = '#8fd19e';
+        }
+        batchTimerStart = null;
+      }
       if(batchWorkflowList) batchWorkflowList.innerHTML = STAGES.map((s,i)=>
         `<div>${i+1}. ${s.label}</div>`
       ).join('');
@@ -6688,6 +6820,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
 
       async function runPrepQueue(){
         prepRunning = true;
+        startBatchTimer();
         tabKeepAlive.start(); // keep this tab exempt from background throttling for the whole run
         try{
         let doneCount = currentPacks.filter(p=>p.status==='ready_for_review'||p.status==='done'||p.status==='no_match').length;
@@ -6773,6 +6906,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
         } finally {
           prepRunning = false;
           tabKeepAlive.stop();
+          stopBatchTimer();
         }
       }
 
