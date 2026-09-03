@@ -861,6 +861,17 @@
         <select id="tmplPickerSelect" style="width:100%;margin-bottom:8px;background:#0e120f;color:var(--paper);border:1px solid var(--line);border-radius:4px;padding:8px;font-family:var(--mono);font-size:11px;"></select>
         <button class="align-btn" id="tmplPickerLoadBtn" type="button" style="width:100%;">Load this template</button>
       </div>
+      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+        <div style="font-size:9.5px;color:rgba(242,240,230,0.55);line-height:1.5;margin-bottom:8px;">
+          Everything lives in this browser's storage for THIS exact file — a re-downloaded copy (Chrome auto-renames it "(2)", "(3)"…) is a different file to the browser and starts empty. Backup before replacing this file; Restore right after opening the new copy.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="align-btn" id="backupAllBtn" type="button">⬇ Backup all data</button>
+          <button class="align-btn" id="restoreAllBtn" type="button">⬆ Restore all data</button>
+          <input type="file" id="restoreAllFile" accept=".zip,application/zip" style="display:none;">
+        </div>
+        <div id="backupAllStatus" style="font-size:9.5px;margin-top:6px;display:none;"></div>
+      </div>
       <div id="tmplStatus" style="font-size:9.5px;color:var(--green-bright);margin-top:8px;min-height:12px;"></div>
     </div>
 
@@ -3129,7 +3140,7 @@
 
   // ---------- storage: IndexedDB (localStorage is too small for images/videos) ----------
   const IDB_NAME = 'hookShowcaseDB';
-  const IDB_VERSION = 6;
+  const IDB_VERSION = 7;
   // ---------- schema note ----------
   // v3 stored the blob (mp4/mp3) INSIDE the same record as its metadata (name, date,
   // transcript, template…). Every list screen — gallery, voice-over library, music
@@ -3190,6 +3201,21 @@
         // re-rendering anything.
         if(!db.objectStoreNames.contains('batchPackTemplates')) db.createObjectStore('batchPackTemplates', { keyPath:'id' });
         if(!db.objectStoreNames.contains('batchRenders')) db.createObjectStore('batchRenders', { keyPath:'id' });
+        // v7: PERFORMANCE FIX — the grid polls pack status every 2s, and every
+        // status write (dozens of times per batch) previously went through
+        // idbGetAll('batchPacks') / idbPut('batchPacks', rec) on the SAME store
+        // that also holds each pack's full-resolution image Files (the actual
+        // multi-GB payload). Deserializing that whole store — every image blob,
+        // for every pack — just to read a status string is exactly what was
+        // freezing Chrome as a batch grew: gigabytes moved off disk every 2
+        // seconds for a UI update that only needed a dozen short strings.
+        // batchPackStatus mirrors ONLY the small display fields (status, order,
+        // folderName, error, stage, matchInfo, syncLog) for every pack. The
+        // grid, polling, and focus-refresh now read/write this tiny store
+        // exclusively; 'batchPacks' (with imageFiles) is only ever touched by
+        // idbGet/idbPut of ONE record, at the one moment that pack's own
+        // review/prep/rerender tab actually needs its images.
+        if(!db.objectStoreNames.contains('batchPackStatus')) db.createObjectStore('batchPackStatus', { keyPath:'id' });
         if(ev.oldVersion > 0 && ev.oldVersion < 4){
           // migrate: pull the inline blob out of each existing record, into its new
           // sibling store, leaving lightweight metadata behind in the original store.
@@ -3288,6 +3314,47 @@
       req.onsuccess = ()=>resolve(req.result || []);
       req.onerror = ()=>reject(req.error);
     });
+  }
+  // ---------- batchPackStatus helpers (v7 perf split) ----------
+  // Pull just the light display fields off a full batchPacks record (which also
+  // carries imageFiles — the heavy part we're avoiding).
+  function packStatusFields(rec){
+    return {
+      id: rec.id, batchId: rec.batchId, order: rec.order, folderName: rec.folderName,
+      status: rec.status, error: rec.error || null, stage: rec.stage || null,
+      matchInfo: rec.matchInfo || null, syncLog: rec.syncLog || null
+    };
+  }
+  // Call this every time a batchPacks record's status/error/stage/etc. changes —
+  // mirrors just those fields into the tiny status store the grid actually reads.
+  async function syncPackStatus(rec){
+    try{ await idbPut('batchPackStatus', packStatusFields(rec)); }
+    catch(err){ console.error('syncPackStatus failed', err); }
+  }
+  let _packStatusMigrated = false;
+  async function ensurePackStatusMigrated(){
+    if(_packStatusMigrated) return;
+    _packStatusMigrated = true;
+    try{
+      const existing = await idbGetAll('batchPackStatus');
+      if(existing.length) return;
+      const heavy = await idbGetAll('batchPacks');
+      for(const rec of heavy) await syncPackStatus(rec);
+    } catch(err){ console.error('pack status migration failed', err); }
+  }
+  // What the grid/poll/focus-refresh/resume-check call instead of
+  // idbGetAll('batchPacks') — cheap, no image blobs touched.
+  async function getAllPackStatuses(batchId){
+    await ensurePackStatusMigrated();
+    return (await idbGetAll('batchPackStatus')).filter(p=>p.batchId===batchId).sort((a,b)=>a.order-b.order);
+  }
+  async function getAllPackStatusesAllBatches(){
+    await ensurePackStatusMigrated();
+    return idbGetAll('batchPackStatus');
+  }
+  async function deletePackEverywhere(id){
+    await idbDelete('batchPacks', id).catch(()=>{});
+    await idbDelete('batchPackStatus', id).catch(()=>{});
   }
   // ---------- blob helpers (new in v4 split) ----------
   // Fetch the actual Blob for one video/voiceover/music record, only when something
@@ -3591,6 +3658,13 @@
     return true;
   }
 
+  // Read once, at load, so both saveTemplateToStorage (defined here, early) and
+  // the later batch/grid code (which re-derives its own local copies) agree on
+  // whether this tab is an embedded review/prep/rerender iframe.
+  const __embeddedQS = new URLSearchParams(location.search);
+  const APP_EMBEDDED_MODE = __embeddedQS.get('embedded')==='1' ? (__embeddedQS.get('mode')||'review') : null;
+  const APP_EMBEDDED_PACK_ID = __embeddedQS.get('packId') ? +__embeddedQS.get('packId') : null;
+
   async function saveTemplateToStorage(){
     try{
       // BUG FIX: 'current' is ONE shared key across every tab/iframe. Headless
@@ -3598,8 +3672,23 @@
       // so whichever pack last wrote here won — and autoRestoreTemplate() below
       // would then load that random other pack's audio/images/captions on top
       // of the correct per-pack template. Embedded pages persist per-pack via
-      // batchPackTemplates instead, so never touch the shared key.
-      if(new URLSearchParams(location.search).get('embedded') === '1') return true;
+      // batchPackTemplates instead of the shared key.
+      if(APP_EMBEDDED_MODE === 'review' && APP_EMBEDDED_PACK_ID != null){
+        // BUG FIX (save-state): this used to just `return true` here and never
+        // write anything — every manual edit made inside a pack's review tab
+        // (sliders, colors, captions, images) lived only in that tab's DOM and
+        // vanished the moment the tab was closed or the pack reopened, because
+        // batchPackTemplates was only ever written once, during the original
+        // headless auto-prepare pass. Now every edit persists immediately to
+        // THIS pack's own template record, keyed by its own id — never the
+        // shared 'current' key — so reopening always resumes the latest edit,
+        // and "Download All" (via the ver check added below) can tell whether
+        // a pack's cached render is stale relative to its latest saved edit.
+        const template = await collectTemplate();
+        await idbPut('batchPackTemplates', { id: APP_EMBEDDED_PACK_ID, template, ver: Date.now() });
+        return true;
+      }
+      if(APP_EMBEDDED_MODE) return true; // prep/rerender iframes manage their own persistence explicitly
       await idbPut('templates', await collectTemplate(), TEMPLATE_KEY);
       return true;
     } catch(err){ console.error('template save failed', err); return false; }
@@ -5758,6 +5847,36 @@
     }
     function statesEqual(a,b){ return JSON.stringify(a)===JSON.stringify(b); }
 
+    // ---- universal capture: every MANUAL edit (slider drag, typing, dropdown,
+    // toggle, color pick) becomes one undo step and one autosave, the same way
+    // voice edits already do — reusing snapshotState/restoreState/pushUndoEntry
+    // as-is, so there is exactly one undo/redo system, not two. BUG FIX: before
+    // this, pushUndoEntry only ever fired from the voice-command path (plus one
+    // hardcoded image-replace call), so manual edits had no undo at all, and
+    // only ~10 of the many input/slider/toggle controls even called
+    // saveTemplateToStorageDebounced — most manual edits weren't autosaved
+    // either. One delegated listener pair fixes both, for every control, without
+    // touching each control's own handler.
+    let _preEditSnapshot = null;
+    function _isTrackableField(el){
+      return !!el && (el.tagName==='INPUT' || el.tagName==='SELECT' || el.tagName==='TEXTAREA');
+    }
+    document.addEventListener('focusin', e=>{
+      if(_isTrackableField(e.target) && !_preEditSnapshot) _preEditSnapshot = snapshotState();
+    }, true);
+    document.addEventListener('pointerdown', e=>{
+      const el = e.target && e.target.closest && e.target.closest('input[type="range"],input[type="checkbox"],input[type="color"]');
+      if(el && !_isTrackableField(document.activeElement) && !_preEditSnapshot) _preEditSnapshot = snapshotState();
+    }, true);
+    function _commitManualEdit(){
+      if(!_preEditSnapshot) return;
+      const before = _preEditSnapshot; _preEditSnapshot = null;
+      const after = snapshotState();
+      if(!statesEqual(before, after)) pushUndoEntry('Manual edit', before, after, null);
+      saveTemplateToStorageDebounced();
+    }
+    document.addEventListener('change', e=>{ if(_isTrackableField(e.target)) _commitManualEdit(); }, true);
+
     let undoStack = [];   // {label, before, after}
     let redoStack = [];
     let activityLog = []; // everything shown in the Action History panel: {label, ts, kind}
@@ -5822,8 +5941,29 @@
     }
     historyBtn.addEventListener('click', ()=>{ historyPanel.style.display = historyPanel.style.display==='none' ? 'flex' : 'none'; });
     historyCloseBtn.addEventListener('click', ()=> historyPanel.style.display='none');
-    voiceUndoBtn.addEventListener('click', ()=>{ const msg = undoSteps(1); say(msg, true); });
-    voiceRedoBtn.addEventListener('click', ()=>{ const msg = redoSteps(1); say(msg, true); });
+    function _refreshUndoRedoButtons(){
+      voiceUndoBtn.style.opacity = undoStack.length ? '1' : '0.35';
+      voiceRedoBtn.style.opacity = redoStack.length ? '1' : '0.35';
+    }
+    const _origPushUndoEntry = pushUndoEntry;
+    pushUndoEntry = function(...args){ _origPushUndoEntry(...args); _refreshUndoRedoButtons(); };
+    voiceUndoBtn.addEventListener('click', ()=>{ const msg = undoSteps(1); say(msg, true); _refreshUndoRedoButtons(); });
+    voiceRedoBtn.addEventListener('click', ()=>{ const msg = redoSteps(1); say(msg, true); _refreshUndoRedoButtons(); });
+    _refreshUndoRedoButtons();
+
+    // BUG FIX: Cmd+Z / Cmd+Shift+Z (Ctrl on Windows/Linux) did nothing at all —
+    // there was no keydown binding anywhere. Wired here, at document level in
+    // the capture phase, so it works no matter what's focused (a slider, a text
+    // field, nothing) and Docs/Sheets-style always drives the SAME undo/redo
+    // stack as the ↶/↷ buttons and voice commands, instead of the browser's
+    // native per-field text undo.
+    document.addEventListener('keydown', e=>{
+      const mod = e.metaKey || e.ctrlKey;
+      if(!mod || e.key.toLowerCase() !== 'z') return;
+      e.preventDefault();
+      if(e.shiftKey) redoSteps(1); else undoSteps(1);
+      _refreshUndoRedoButtons();
+    }, true);
 
     // Runs one action through validation + execution + (if state-mutating) history capture.
     // This is the ONLY place editor state gets touched as a result of a voice command —
@@ -6623,7 +6763,17 @@ Reply with ONLY JSON. No prose, no markdown.`;
           };
           const id = await idbPut('batchPacks', record);
           record.id = id;
-          currentPacks.push(record);
+          // PERF FIX: currentPacks used to hold this full record — imageFiles and
+          // all — for every pack in the batch, for as long as the grid tab stayed
+          // open. With a 100-pack batch of real photos that's the pack library's
+          // entire multi-GB image set sitting in JS memory at once, on top of
+          // whatever IndexedDB was doing. currentPacks now only ever holds the
+          // light status fields; the heavy record stays in IndexedDB and is only
+          // pulled back out (one pack at a time) by whichever tab is actually
+          // reviewing/prepping/rerendering that specific pack.
+          const statusRec = packStatusFields(record);
+          await syncPackStatus(record);
+          currentPacks.push(statusRec);
         }
 
         const allSkipped = skipped.concat(badManifests);
@@ -6715,7 +6865,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
       });
 
       async function checkForResumableBatch(){
-        const all = await idbGetAll('batchPacks');
+        const all = await getAllPackStatusesAllBatches();
         const unfinished = all.filter(p => p.status !== 'done');
         if(!unfinished.length) return;
         const byBatch = new Map();
@@ -6727,13 +6877,13 @@ Reply with ONLY JSON. No prose, no markdown.`;
         batchResumeBtn.onclick = async ()=>{
           currentBatchId = batchId;
           localStorage.setItem('activeBatchId', currentBatchId);
-          currentPacks = (await idbGetAll('batchPacks')).filter(p=>p.batchId===batchId).sort((a,b)=>a.order-b.order);
+          currentPacks = await getAllPackStatuses(batchId);
           batchResumeBox.style.display = 'none';
           renderBatchSummary();
           openGrid();
         };
         batchClearBtn.onclick = async ()=>{
-          for(const p of unfinished) await idbDelete('batchPacks', p.id);
+          for(const p of unfinished) await deletePackEverywhere(p.id);
           batchResumeBox.style.display = 'none';
           setIngestStatus('Old batch cleared.', true);
         };
@@ -6743,11 +6893,18 @@ Reply with ONLY JSON. No prose, no markdown.`;
       // no need to reselect the folder just to get back to the grid.
       (async ()=>{
         if(!currentBatchId) return;
-        const all = (await idbGetAll('batchPacks')).filter(p=>p.batchId===currentBatchId).sort((a,b)=>a.order-b.order);
+        const all = await getAllPackStatuses(currentBatchId);
         // a pack left mid-"processing" from a tab close/crash has no orchestrator
         // running for it anymore — put it back in the queue instead of leaving it
         // stuck and unclickable forever.
-        for(const p of all){ if(p.status === 'processing'){ p.status = 'queued'; await idbPut('batchPacks', p); } }
+        for(const p of all){
+          if(p.status === 'processing'){
+            p.status = 'queued';
+            await syncPackStatus(p); // status store is source of truth for display
+            const heavyRec = await idbGet('batchPacks', p.id).catch(()=>null);
+            if(heavyRec){ heavyRec.status = 'queued'; await idbPut('batchPacks', heavyRec); }
+          }
+        }
         if(all.length){
           currentPacks = all;
           renderBatchSummary();
@@ -6889,6 +7046,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
             rec.stage = result.stage || null;
             if(result.syncLog) rec.syncLog = result.syncLog;
             await idbPut('batchPacks', rec);
+            await syncPackStatus(rec);
           }
           if(idx>=0){
             currentPacks[idx].status = result.status;
@@ -6941,13 +7099,32 @@ Reply with ONLY JSON. No prose, no markdown.`;
       let gridPollTimer = null;
       async function refreshPacksFromIdb(){
         if(!currentBatchId) return;
-        const fresh = (await idbGetAll('batchPacks')).filter(p=>p.batchId===currentBatchId).sort((a,b)=>a.order-b.order);
+        // PERF FIX: this used to be idbGetAll('batchPacks') on a 2-second timer —
+        // deserializing every pack's full imageFiles payload (the multi-GB part)
+        // just to refresh a status grid. Reads the lightweight status store now.
+        const fresh = await getAllPackStatuses(currentBatchId);
         if(fresh.length) currentPacks = fresh;
+      }
+      // PERF FIX: renderGrid() tears down and rebuilds every pack tile's DOM node
+      // (plus listeners) from scratch. With 100 packs, doing that unconditionally
+      // every 2s (and on every window focus) is real, avoidable main-thread churn
+      // when nothing actually changed since the last poll. Skip the rebuild when
+      // the status signature is identical.
+      let _lastGridSignature = null;
+      function gridSignature(){
+        return currentPacks.map(p=>`${p.id}:${p.status}:${p.error||''}:${p.stage||''}:${p.syncLog?1:0}`).join('|');
+      }
+      function renderGridIfChanged(){
+        const sig = gridSignature();
+        if(sig === _lastGridSignature) return;
+        _lastGridSignature = sig;
+        renderGrid();
       }
       function openGrid(){
         batchGridOverlay.style.display = 'flex';
         batchGridTitle.textContent = `Pack grid — ${currentPacks.length} pack(s)`;
-        renderGrid();
+        _lastGridSignature = null; // force a render — grid was just (re)opened
+        renderGridIfChanged();
         // FIX: reviewing now happens in separate tabs (see openReview), so
         // this grid tab has to poll IndexedDB itself to see status changes
         // (e.g. a pack finishing its render+download) made from those other
@@ -6956,7 +7133,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
         gridPollTimer = setInterval(async ()=>{
           if(batchGridOverlay.style.display === 'none') return;
           await refreshPacksFromIdb();
-          renderGrid();
+          renderGridIfChanged();
         }, 2000);
       }
       batchOpenGridBtn.addEventListener('click', openGrid);
@@ -6967,8 +7144,9 @@ Reply with ONLY JSON. No prose, no markdown.`;
       // closing never destroys anything — currentPacks + idb stay put, so the grid
       // (and everything already prepared/rendered) is right there next time it's opened.
       window.addEventListener('focus', async ()=>{
-        if(batchGridOverlay.style.display !== 'none'){ await refreshPacksFromIdb(); renderGrid(); }
+        if(batchGridOverlay.style.display !== 'none'){ await refreshPacksFromIdb(); renderGridIfChanged(); }
       });
+
 
       function renderGrid(){
         batchGridSummary.textContent = (()=>{
@@ -7051,7 +7229,7 @@ Reply with ONLY JSON. No prose, no markdown.`;
         document.getElementById('errRetryBtn').addEventListener('click', ()=>{
           batchErrorPanel.style.display = 'none';
           p.status = 'queued'; p.error = null;
-          idbGet('batchPacks', p.id).then(rec=>{ if(rec){ rec.status='queued'; rec.error=null; idbPut('batchPacks', rec); } });
+          idbGet('batchPacks', p.id).then(rec=>{ if(rec){ rec.status='queued'; rec.error=null; idbPut('batchPacks', rec); syncPackStatus(rec); } });
           renderGrid(); renderBatchSummary();
           startPrep([p.id]);
         });
@@ -7167,16 +7345,198 @@ window.addEventListener('message', async (ev)=>{
         return new Blob([...parts, ...centralParts, end.buffer], { type:'application/zip' });
       }
 
+      // ================= BACKUP / RESTORE ALL DATA =================
+      // ROOT CAUSE of "data gone after downloading the new version": Chrome
+      // scopes file:// IndexedDB storage to the exact file path. Every time this
+      // file is re-downloaded, Chrome auto-renames it ("hook_showcase (2).html",
+      // "(3)", …) to avoid overwriting — and each distinct filename/path is, to
+      // Chrome, an entirely separate storage bucket. That's a browser platform
+      // rule for local files; a page's own JS cannot make two different file://
+      // paths share storage. The fix that DOES work: export everything before
+      // swapping files, import it right after opening the new copy. (Replacing
+      // the file in place at the exact same path, instead of letting Chrome save
+      // a numbered duplicate, also avoids the problem entirely.)
+      //
+      // Walks any IndexedDB record generically (no store-specific field lists —
+      // covers today's stores and any added later) and pulls every Blob/File out
+      // of it, wherever it's nested, into its own zip entry — keeping the zip
+      // binary (no base64 bloat) the same way "Download All Packs" already does.
+      async function walkExtractBlobs(value, path, blobEntries){
+        if(value instanceof Blob){
+          const name = path + '.bin';
+          blobEntries.push({ name, blob: value });
+          return { __blobRef: name, __isFile: (typeof File!=='undefined' && value instanceof File), __fileName: value.name || '', __mime: value.type || '' };
+        }
+        if(Array.isArray(value)){
+          const out = [];
+          for(let i=0;i<value.length;i++) out.push(await walkExtractBlobs(value[i], `${path}_${i}`, blobEntries));
+          return out;
+        }
+        if(value && typeof value === 'object' && !(value instanceof Date)){
+          const out = {};
+          for(const k of Object.keys(value)) out[k] = await walkExtractBlobs(value[k], `${path}_${k}`, blobEntries);
+          return out;
+        }
+        return value;
+      }
+      async function walkInjectBlobs(value, zip){
+        if(value && typeof value === 'object' && !Array.isArray(value) && value.__blobRef){
+          const entry = zip.file(value.__blobRef);
+          if(!entry) return null;
+          const buf = await entry.async('arraybuffer');
+          const blob = new Blob([buf], { type: value.__mime || '' });
+          return value.__isFile ? new File([blob], value.__fileName || 'file', { type: value.__mime || '' }) : blob;
+        }
+        if(Array.isArray(value)){
+          const out = [];
+          for(const v of value) out.push(await walkInjectBlobs(v, zip));
+          return out;
+        }
+        if(value && typeof value === 'object'){
+          const out = {};
+          for(const k of Object.keys(value)) out[k] = await walkInjectBlobs(value[k], zip);
+          return out;
+        }
+        return value;
+      }
+
+      const backupAllBtn = document.getElementById('backupAllBtn');
+      const restoreAllBtn = document.getElementById('restoreAllBtn');
+      const restoreAllFile = document.getElementById('restoreAllFile');
+      const backupAllStatus = document.getElementById('backupAllStatus');
+      function setBackupStatus(msg, isError){
+        backupAllStatus.style.display = msg ? 'block' : 'none';
+        backupAllStatus.textContent = msg || '';
+        backupAllStatus.style.color = isError ? '#e05a4a' : 'var(--green-bright)';
+      }
+
+      backupAllBtn.addEventListener('click', async ()=>{
+        backupAllBtn.disabled = true;
+        const origLabel = backupAllBtn.textContent;
+        try{
+          setBackupStatus('Reading every store…');
+          const db = await openDB();
+          const storeNames = Array.from(db.objectStoreNames);
+          const manifest = { formatVersion: 1, exportedAt: Date.now(), stores: {} };
+          const blobEntries = [];
+          for(const storeName of storeNames){
+            backupAllBtn.textContent = `Reading ${storeName}…`;
+            if(storeName === 'templates'){
+              // out-of-line keys (arbitrary names, plus the 'current' key) — keys
+              // aren't part of the stored value, so keep them paired explicitly.
+              const keys = await idbGetAllKeys('templates');
+              const rows = [];
+              for(const key of keys){
+                const val = await idbGet('templates', key);
+                rows.push({ key, value: await walkExtractBlobs(val, `templates_${String(key).replace(/[^a-z0-9_-]/gi,'_')}`, blobEntries) });
+              }
+              manifest.stores[storeName] = { keyed: true, rows };
+            } else {
+              const all = await idbGetAll(storeName);
+              const rows = [];
+              for(const rec of all) rows.push(await walkExtractBlobs(rec, `${storeName}_${rec.id}`, blobEntries));
+              manifest.stores[storeName] = { keyed: false, rows };
+            }
+          }
+          backupAllBtn.textContent = 'Zipping…';
+          const manifestBlob = new Blob([JSON.stringify(manifest)], { type:'application/json' });
+          const zipEntries = [{ name:'manifest.json', blob: manifestBlob }, ...blobEntries];
+          const zipBlob = await buildZip(zipEntries, (i,total)=>{ backupAllBtn.textContent = `Zipping ${i}/${total}…`; });
+          const url = URL.createObjectURL(zipBlob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `hook-showcase-backup-${new Date().toISOString().slice(0,10)}.zip`;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url), 30000);
+          setBackupStatus(`Backed up ${blobEntries.length} file(s) across ${storeNames.length} store(s).`);
+        } catch(err){
+          console.error('backup all failed', err);
+          setBackupStatus('Backup failed: ' + ((err&&err.message)||err), true);
+        }
+        backupAllBtn.disabled = false; backupAllBtn.textContent = origLabel;
+      });
+
+      restoreAllBtn.addEventListener('click', ()=> restoreAllFile.click());
+      restoreAllFile.addEventListener('change', async e=>{
+        const file = e.target.files && e.target.files[0];
+        restoreAllFile.value = '';
+        if(!file) return;
+        restoreAllBtn.disabled = true;
+        const origLabel = restoreAllBtn.textContent;
+        try{
+          setBackupStatus('Reading backup zip…');
+          const JSZip = await loadJSZip();
+          const zip = await JSZip.loadAsync(file);
+          const manifestEntry = zip.file('manifest.json');
+          if(!manifestEntry) throw new Error('Not a valid backup file — manifest.json missing.');
+          const manifest = JSON.parse(await manifestEntry.async('string'));
+          const storeNames = Object.keys(manifest.stores || {});
+          let written = 0;
+          for(const storeName of storeNames){
+            restoreAllBtn.textContent = `Restoring ${storeName}…`;
+            const { keyed, rows } = manifest.stores[storeName];
+            for(const row of rows){
+              if(keyed){
+                const value = await walkInjectBlobs(row.value, zip);
+                await idbPut(storeName, value, row.key);
+              } else {
+                const value = await walkInjectBlobs(row, zip);
+                await idbPut(storeName, value);
+              }
+              written++;
+            }
+          }
+          _idbAllCache.clear();
+          setBackupStatus(`Restored ${written} record(s) across ${storeNames.length} store(s). Reload the page to see everything.`);
+        } catch(err){
+          console.error('restore all failed', err);
+          setBackupStatus('Restore failed: ' + ((err&&err.message)||err), true);
+        }
+        restoreAllBtn.disabled = false; restoreAllBtn.textContent = origLabel;
+      });
+
       function setDownloadAllStatus(msg){
         batchDownloadAllStatus.style.display = msg ? 'block' : 'none';
         batchDownloadAllStatus.textContent = msg || '';
       }
 
+      // BUG FIX (Download All used stale versions): a pack's cached render in
+      // batchRenders only ever reflected whatever was true at the moment
+      // "Reviewed — Good to Go" was last clicked. If the pack was reopened and
+      // edited again afterward (now actually saved, per the fix above) but never
+      // re-rendered by hand, Download All silently zipped the OLD render. This
+      // compares each done pack's saved-template version against its cached
+      // render's version and headlessly re-renders only the ones that drifted —
+      // so the zip always matches the latest edit, without re-rendering packs
+      // that were never touched after their last render.
+      async function rerenderStalePacksBeforeZip(donePacks, onProgress){
+        const stale = [];
+        for(const p of donePacks){
+          const tRec = await idbGet('batchPackTemplates', p.id).catch(()=>null);
+          const rRec = await idbGet('batchRenders', p.id).catch(()=>null);
+          if(tRec && (!rRec || rRec.ver !== tRec.ver)) stale.push(p);
+        }
+        for(let i=0;i<stale.length;i++){
+          const p = stale[i];
+          onProgress(i+1, stale.length, p.folderName || ('pack-'+p.order));
+          await new Promise(resolve=>{
+            let settled = false;
+            const finish = (v)=>{ if(settled) return; settled = true; clearTimeout(hardCap); resolve(v); };
+            const hardCap = setTimeout(()=>finish({status:'error'}), 300000); // 5 min cap per pack
+            prepWaiter = finish;
+            batchPrepIframe.onerror = ()=>finish({status:'error'});
+            batchPrepIframe.src = baseUrl() + `?embedded=1&mode=rerender&packId=${p.id}&_t=${Date.now()}`;
+          });
+          batchPrepIframe.removeAttribute('src');
+        }
+      }
+
       batchDownloadAllBtn.addEventListener('click', async ()=>{
+        if(prepRunning){ setDownloadAllStatus('Auto-prepare is still running — wait for it to finish, then download.'); return; }
         const donePacks = currentPacks.filter(p=>p.status==='done');
         if(!donePacks.length){ setDownloadAllStatus('No packs rendered yet — click "Start auto-prepare" first; every pack renders automatically in the background.'); return; }
         batchDownloadAllBtn.disabled = true;
         try{
+          await rerenderStalePacksBeforeZip(donePacks, (i,total,name)=> setDownloadAllStatus(`Re-rendering edited pack ${i}/${total} — ${name}…`));
           const entries = [];
           for(const p of donePacks){
             const rec = await idbGet('batchRenders', p.id).catch(()=>null);
@@ -7344,7 +7704,8 @@ window.addEventListener('message', async (ev)=>{
           await applyDefaultBackgroundMusic();
           applyLockedCaptionRules(); // defensive re-lock — guarantees the saved template always has the exact spec'd sizes/positions, no matter what ran above
           const template = await collectTemplate();
-          await idbPut('batchPackTemplates', { id: embeddedPackId, template });
+          var __prepTemplateVer = Date.now();
+          await idbPut('batchPackTemplates', { id: embeddedPackId, template, ver: __prepTemplateVer });
         } catch(err){
           console.error('saving prepared template failed', err);
           if(status !== 'error'){ status = 'error'; note = `[${stageLabel(currentStage)}] Prepared, but saving the project failed: ` + ((err&&err.message)||err); }
@@ -7363,7 +7724,9 @@ window.addEventListener('message', async (ev)=>{
             const renderResult = await performExportAndDownload({ autoDownload:false, onRenderProgress: pct => setStage('render', pct) });
             if(renderResult && renderResult.ok){
               setStage('save');
-              await idbPut('batchRenders', { id: embeddedPackId, blob: renderResult.blob });
+              // ver stamped to match the template just rendered, so "Download All"
+              // can tell a later manual edit (new ver) apart from this render.
+              await idbPut('batchRenders', { id: embeddedPackId, blob: renderResult.blob, ver: (typeof __prepTemplateVer!=='undefined'?__prepTemplateVer:Date.now()) });
               status = 'done';
             } else {
               status = 'error';
@@ -7382,13 +7745,51 @@ window.addEventListener('message', async (ev)=>{
         if(syncLog){
           try{
             const recNow = await idbGet('batchPacks', embeddedPackId);
-            if(recNow){ recNow.syncLog = syncLog; await idbPut('batchPacks', recNow); }
+            if(recNow){ recNow.syncLog = syncLog; await idbPut('batchPacks', recNow); await syncPackStatus(recNow); }
           } catch(err){ console.error('saving sync log failed', err); }
         }
 
         clearInterval(heartbeatTimer);
         tabKeepAlive.stop();
         parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note, matchInfo, stage: currentStage, syncLog }, '*');
+      })();
+    }
+
+    // ---------- embedded mode=rerender: headless re-render of an already-edited
+    // pack, used only by "Download All Packs" to bring a stale cached render back
+    // in line with the latest saved edit — skips find-mp3/speed/sync (already
+    // done and saved in the template) so it's just decode+draw+encode, fast.
+    if(embeddedMode === 'rerender'){
+      const heartbeatTimer = setInterval(()=>{
+        parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
+      }, 4000);
+      parent.postMessage({ type:'PREP_PACK_HEARTBEAT', packId: embeddedPackId }, '*');
+      tabKeepAlive.start();
+      (async function runRerender(){
+        let status = 'error', note = null;
+        try{
+          const rec = await idbGet('batchPacks', embeddedPackId);
+          if(!rec) throw new Error('Pack not found — it may have been cleared.');
+          currentPackFilename = (rec.folderName || ('pack-'+rec.order)).replace(/[^a-z0-9-_ ]/gi,'').trim().replace(/\s+/g,'-') + '.mp4';
+          await applyManifest(rec.items, rec.imageFiles, rec.root);
+          const tRec = await idbGet('batchPackTemplates', embeddedPackId).catch(()=>null);
+          if(!tRec || !tRec.template) throw new Error('No saved edit found for this pack.');
+          await applyTemplate(tRec.template);
+          applyLockedCaptionRules();
+          const renderResult = await performExportAndDownload({ autoDownload:false });
+          if(renderResult && renderResult.ok){
+            await idbPut('batchRenders', { id: embeddedPackId, blob: renderResult.blob, ver: tRec.ver || Date.now() });
+            status = 'done';
+          } else {
+            note = (renderResult && renderResult.message) || 'Re-render failed.';
+          }
+        } catch(err){
+          console.error('rerender failed', err);
+          note = (err && err.message) || String(err);
+        }
+        clearInterval(heartbeatTimer);
+        tabKeepAlive.stop();
+        parent.postMessage({ type:'PREP_PACK_DONE', packId: embeddedPackId, status, note }, '*');
       })();
     }
 
@@ -7510,17 +7911,24 @@ window.addEventListener('message', async (ev)=>{
         // right now and open the next pack while this one renders.
         setReviewEnabled(false);
         statusText.textContent = 'Rendering & downloading… (safe to switch tabs now — this keeps going in the background)';
+        // Flush any edit still sitting in the debounce window before rendering,
+        // so the ver stamped on this render always matches exactly what's about
+        // to be exported — never a slightly-stale saved template.
+        await saveTemplateToStorage();
         const result = await performExportAndDownload({ autoDownload:true });
         if(result && result.ok){
-          try{ await idbPut('batchRenders', { id: embeddedPackId, blob: result.blob }); }
+          try{
+            const tRec = await idbGet('batchPackTemplates', embeddedPackId).catch(()=>null);
+            await idbPut('batchRenders', { id: embeddedPackId, blob: result.blob, ver: (tRec && tRec.ver) || Date.now() });
+          }
           catch(err){ console.error('caching render for ZIP failed', err); }
           const rec = await idbGet('batchPacks', embeddedPackId).catch(()=>null);
-          if(rec){ rec.status = 'done'; rec.error = null; await idbPut('batchPacks', rec).catch(()=>{}); }
+          if(rec){ rec.status = 'done'; rec.error = null; await idbPut('batchPacks', rec).catch(()=>{}); await syncPackStatus(rec).catch(()=>{}); }
           statusText.textContent = 'Done — downloaded. Closing this tab…';
           setTimeout(backToGrid, 600);
         } else {
           const rec = await idbGet('batchPacks', embeddedPackId).catch(()=>null);
-          if(rec){ rec.status = 'error'; rec.error = (result&&result.message)||'Render failed.'; await idbPut('batchPacks', rec).catch(()=>{}); }
+          if(rec){ rec.status = 'error'; rec.error = (result&&result.message)||'Render failed.'; await idbPut('batchPacks', rec).catch(()=>{}); await syncPackStatus(rec).catch(()=>{}); }
           statusText.textContent = `Render failed: ${(result&&result.message)||'unknown error'}. Fix and click Reviewed again.`;
           setReviewEnabled(true);
         }
